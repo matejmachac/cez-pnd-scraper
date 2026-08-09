@@ -11,7 +11,7 @@ lightweight Node.js scheduler remains idle between attempts.
 
 ## Requirements
 
-- Home Assistant OS on an `amd64` machine, Core 2025.11 or newer.
+- Home Assistant OS on an `amd64` machine, Core 2026.6 or newer.
 - A working ČEZ Distribuce PND account.
 - A PND dashboard window with a 15-minute `+A` column in `kW`.
 
@@ -65,8 +65,8 @@ the default is 06:30 and can be moved later if needed.
 By default, the app automatically adds the statistic to grid consumption after
 the first successful import. It reads the current Energy preferences first,
 preserves every existing source, and makes no change when the same statistic is
-already configured. Both the HA 2025.11 grid format and the newer unified grid
-format are supported.
+already configured. The unified grid format introduced in HA 2026.6 is used;
+older Home Assistant versions are intentionally unsupported.
 
 If `add_to_energy_dashboard` is disabled, configure it manually:
 

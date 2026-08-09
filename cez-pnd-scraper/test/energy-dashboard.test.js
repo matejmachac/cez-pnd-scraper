@@ -1,34 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildCandidates,
+  addUnifiedGridSource,
   ensureEnergyDashboardSource,
   hasStatistic,
 } from "../src/energy-dashboard.js";
 
 const statisticId = "cez_pnd:consumption_test";
 
-test("merges consumption into a legacy grid without changing other sources", () => {
+test("adds a unified grid source without changing existing sources", () => {
   const sources = [
-    { type: "grid", flow_from: [{ stat_energy_from: "sensor.existing" }], flow_to: [], cost_adjustment_day: 2 },
+    { type: "grid", stat_energy_from: "sensor.existing", cost_adjustment_day: 2 },
     { type: "solar", stat_energy_from: "sensor.solar" },
   ];
-  const [candidate] = buildCandidates(sources, statisticId, "ČEZ PND test");
-  assert.equal(candidate.schema, "legacy");
-  assert.deepEqual(candidate.sources[0].flow_from, [
-    { stat_energy_from: "sensor.existing" },
-    { stat_energy_from: statisticId },
-  ]);
-  assert.deepEqual(candidate.sources[1], sources[1]);
-  assert.equal(candidate.sources[0].cost_adjustment_day, 2);
-});
-
-test("adds a separate source to the unified grid schema", () => {
-  const sources = [{ type: "grid", stat_energy_from: "sensor.existing", cost_adjustment_day: 0 }];
-  const [candidate] = buildCandidates(sources, statisticId, "ČEZ PND test");
-  assert.equal(candidate.schema, "unified");
-  assert.equal(candidate.sources.length, 2);
-  assert.deepEqual(candidate.sources[1], {
+  const updated = addUnifiedGridSource(sources, statisticId, "ČEZ PND test");
+  assert.deepEqual(updated.slice(0, 2), sources);
+  assert.deepEqual(updated[2], {
     type: "grid",
     stat_energy_from: statisticId,
     cost_adjustment_day: 0,
@@ -36,25 +23,25 @@ test("adds a separate source to the unified grid schema", () => {
   });
 });
 
-test("recognizes an existing statistic in both schemas", () => {
+test("recognizes an existing unified grid statistic", () => {
   assert.equal(hasStatistic([{ type: "grid", stat_energy_from: statisticId }], statisticId), true);
-  assert.equal(hasStatistic([{ type: "grid", flow_from: [{ stat_energy_from: statisticId }] }], statisticId), true);
+  assert.equal(hasStatistic([{ type: "grid", stat_energy_from: "sensor.other" }], statisticId), false);
 });
 
-test("falls back from legacy to unified schema when an empty dashboard rejects it", async () => {
-  const saved = [];
+test("saves and validates a new source", async () => {
+  let saved;
   const client = {
-    getEnergyPreferences: async () => null,
+    getEnergyPreferences: async () => ({ energy_sources: [{ type: "solar", stat_energy_from: "sensor.solar" }] }),
     saveEnergySources: async (sources) => {
-      saved.push(sources);
-      if (saved.length === 1) throw Object.assign(new Error("legacy rejected"), { code: "invalid_format" });
+      saved = sources;
       return { energy_sources: sources };
     },
     validateEnergyDashboard: async () => ({ energy_sources: [] }),
   };
   const result = await ensureEnergyDashboardSource(client, statisticId, "ČEZ PND test");
-  assert.equal(result.schema, "unified");
+  assert.equal(result.changed, true);
   assert.equal(saved.length, 2);
+  assert.equal(saved[1].stat_energy_from, statisticId);
 });
 
 test("is idempotent and does not save an existing source", async () => {

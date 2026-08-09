@@ -87,7 +87,7 @@ while (!status.stopping) {
               dashboard.changed
                 ? "Added ČEZ PND consumption to the Energy dashboard"
                 : "ČEZ PND consumption is already present in the Energy dashboard",
-              { statisticId, schema: dashboard.schema },
+              { statisticId },
             );
             if (dashboard.validationError) {
               logger.warn("Energy dashboard was saved but validation could not be run", {

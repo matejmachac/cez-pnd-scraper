@@ -1,10 +1,16 @@
 # Changelog
 
+## 0.3.1
+
+- Require Home Assistant 2026.6 or newer.
+- Remove the legacy Energy grid preferences fallback.
+- Use only the current unified grid source schema.
+
 ## 0.3.0
 
 - Optionally adds the imported statistic to the Home Assistant Energy dashboard.
 - Preserves existing energy sources and avoids duplicate configuration.
-- Supports both legacy and unified Home Assistant grid preference schemas.
+- Targets the unified Energy grid schema in Home Assistant 2026.6 and newer.
 - Treats dashboard setup failures as non-fatal after a successful statistics import.
 
 ## 0.2.0
