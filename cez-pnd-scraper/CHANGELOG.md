@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Avoid Playwright's selector engine on the PND dashboard.
+- Use native DOM evaluation for login, table discovery, period selection, and pagination.
+- Fix `SelectorEvaluatorImpl` crashes caused by PND-modified browser globals.
+
 ## 0.3.1
 
 - Require Home Assistant 2026.6 or newer.
