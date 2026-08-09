@@ -28,6 +28,23 @@ export class HomeAssistantClient {
     return this.command({ type: "recorder/import_statistics", metadata, stats });
   }
 
+  async getEnergyPreferences() {
+    try {
+      return await this.command({ type: "energy/get_prefs" });
+    } catch (error) {
+      if (error instanceof HomeAssistantCommandError && error.code === "not_found") return null;
+      throw error;
+    }
+  }
+
+  async saveEnergySources(energySources) {
+    return this.command({ type: "energy/save_prefs", energy_sources: energySources });
+  }
+
+  async validateEnergyDashboard() {
+    return this.command({ type: "energy/validate" });
+  }
+
   async getLatestSum(statisticId, endTime, lookbackDays = 400) {
     const end = new Date(endTime);
     const start = new Date(end.getTime() - lookbackDays * 86_400_000);
@@ -75,7 +92,10 @@ export class HomeAssistantClient {
       clearTimeout(pending.timer);
       this.pending.delete(message.id);
       if (message.success) pending.resolve(message.result);
-      else pending.reject(new Error(`Home Assistant ${message.type ?? "command"} failed: ${message.error?.message ?? "unknown error"}`));
+      else pending.reject(new HomeAssistantCommandError(
+        message.error?.message ?? "unknown error",
+        message.error?.code,
+      ));
       return;
     }
     this.messageWaiters?.forEach((waiter) => waiter(message));
@@ -108,5 +128,13 @@ export class HomeAssistantClient {
       pending.reject(error);
     }
     this.pending.clear();
+  }
+}
+
+export class HomeAssistantCommandError extends Error {
+  constructor(message, code) {
+    super(`Home Assistant command failed: ${message}`);
+    this.name = "HomeAssistantCommandError";
+    this.code = code;
   }
 }

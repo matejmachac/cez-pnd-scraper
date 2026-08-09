@@ -1,6 +1,7 @@
 import path from "node:path";
 import { DateTime } from "luxon";
 import { loadConfig } from "./config.js";
+import { ensureEnergyDashboardSource } from "./energy-dashboard.js";
 import { HomeAssistantClient } from "./home-assistant.js";
 import { startHealthServer } from "./health.js";
 import {
@@ -73,6 +74,33 @@ while (!status.stopping) {
           createStatisticMetadata(statisticId, `ČEZ PND consumption ${profile.meterId}`),
           batch.stats,
         );
+        let energyDashboardConfigured = false;
+        if (config.addToEnergyDashboard) {
+          try {
+            const dashboard = await ensureEnergyDashboardSource(
+              client,
+              statisticId,
+              `ČEZ PND ${profile.meterId}`,
+            );
+            energyDashboardConfigured = true;
+            logger.info(
+              dashboard.changed
+                ? "Added ČEZ PND consumption to the Energy dashboard"
+                : "ČEZ PND consumption is already present in the Energy dashboard",
+              { statisticId, schema: dashboard.schema },
+            );
+            if (dashboard.validationError) {
+              logger.warn("Energy dashboard was saved but validation could not be run", {
+                error: dashboard.validationError,
+              });
+            }
+          } catch (error) {
+            logger.warn("Statistics were imported, but automatic Energy dashboard setup failed", {
+              error: error.message,
+              statisticId,
+            });
+          }
+        }
         await stateStore.save({
           lastImportedDate: targetDate,
           statisticId,
@@ -80,6 +108,7 @@ while (!status.stopping) {
           cumulativeSum: batch.cumulativeSum,
           lastImportAt: new Date().toISOString(),
           lastDayEnergyKwh: batch.energyKwh,
+          energyDashboardConfigured,
         });
         logger.info("Imported complete PND day into Home Assistant statistics", {
           targetDate,

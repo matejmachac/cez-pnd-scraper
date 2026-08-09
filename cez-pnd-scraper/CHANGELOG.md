@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Optionally adds the imported statistic to the Home Assistant Energy dashboard.
+- Preserves existing energy sources and avoids duplicate configuration.
+- Supports both legacy and unified Home Assistant grid preference schemas.
+- Treats dashboard setup failures as non-fatal after a successful statistics import.
+
 ## 0.2.0
 
 - Replaced 15-minute MQTT publishing with delayed daily statistics import.

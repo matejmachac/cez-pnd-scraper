@@ -17,6 +17,9 @@ configuration:
   retry_minutes:
     name: Interval opakování
     description: Počet minut do dalšího pokusu, když včerejší data ještě nejsou kompletní.
+  add_to_energy_dashboard:
+    name: Přidat do Energy Dashboardu
+    description: Po prvním importu automaticky přidá spotřebu ČEZ PND jako odběr ze sítě a zachová ostatní zdroje.
   statistic_id:
     name: ID statistiky
     description: Volitelné stabilní ID. Prázdná hodnota vytvoří cez_pnd:consumption_<ELM>.

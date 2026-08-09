@@ -17,6 +17,9 @@ configuration:
   retry_minutes:
     name: Retry interval
     description: Minutes until another attempt when yesterday's data is still incomplete.
+  add_to_energy_dashboard:
+    name: Add to Energy dashboard
+    description: Automatically adds ČEZ PND consumption as grid import after the first import and preserves other sources.
   statistic_id:
     name: Statistic ID
     description: Optional stable ID. Empty creates cez_pnd:consumption_<ELM>.

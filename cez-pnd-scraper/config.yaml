@@ -1,5 +1,5 @@
 name: "ČEZ PND Scraper"
-version: "0.2.0"
+version: "0.3.0"
 slug: "cez_pnd_scraper"
 description: "Imports delayed ČEZ PND consumption into Home Assistant long-term statistics."
 arch:
@@ -21,6 +21,7 @@ options:
   import_hour: 6
   import_minute: 30
   retry_minutes: 60
+  add_to_energy_dashboard: true
   statistic_id: ""
   timezone: "Europe/Prague"
   log_level: "info"
@@ -31,6 +32,7 @@ schema:
   import_hour: "int(0,23)"
   import_minute: "int(0,59)"
   retry_minutes: "int(15,360)"
+  add_to_energy_dashboard: bool
   statistic_id: str
   timezone: str
   log_level: "list(debug|info|warn|error)"

@@ -17,6 +17,10 @@ export async function loadConfig(optionsPath = process.env.OPTIONS_PATH ?? DEFAU
     importHour: toInteger(process.env.IMPORT_HOUR ?? options.import_hour, 6),
     importMinute: toInteger(process.env.IMPORT_MINUTE ?? options.import_minute, 30),
     retryMinutes: toInteger(process.env.RETRY_MINUTES ?? options.retry_minutes, 60),
+    addToEnergyDashboard: toBoolean(
+      process.env.ADD_TO_ENERGY_DASHBOARD ?? options.add_to_energy_dashboard,
+      true,
+    ),
     statisticId: String(process.env.STATISTIC_ID ?? options.statistic_id ?? "").trim(),
     timezone: process.env.TZ ?? options.timezone ?? "Europe/Prague",
     logLevel: process.env.LOG_LEVEL ?? options.log_level ?? "info",
@@ -47,4 +51,12 @@ function toInteger(value, fallback) {
   const parsed = Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed)) throw new Error(`Expected an integer, got: ${value}`);
   return parsed;
+}
+
+function toBoolean(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  if (String(value).toLowerCase() === "true") return true;
+  if (String(value).toLowerCase() === "false") return false;
+  throw new Error(`Expected a boolean, got: ${value}`);
 }

@@ -8,6 +8,10 @@ all expected intervals, converts `kW` samples to hourly `kWh`, and imports them
 with their historical timestamps through the Supervisor-proxied Home Assistant
 WebSocket API. MQTT and an external server are not needed.
 
+After the first import, the app can also add its external statistic to the
+Energy dashboard automatically without replacing existing sources. This is
+enabled by default and supports both the legacy and unified grid schemas.
+
 Only a lightweight Node.js scheduler stays alive. Chromium starts for a daily
 attempt (and retries while yesterday is incomplete) and is closed immediately
 afterward. PND credentials and browser state live only in the app's private
@@ -30,7 +34,7 @@ Build the same image that HAOS builds:
 
 ```bash
 docker build \
-  --build-arg BUILD_VERSION=0.2.0 \
+  --build-arg BUILD_VERSION=0.3.0 \
   --build-arg BUILD_ARCH=amd64 \
   -t cez-pnd-scraper:dev \
   cez-pnd-scraper

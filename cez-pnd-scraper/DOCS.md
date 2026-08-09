@@ -30,6 +30,8 @@ access from Supervisor.
 - `import_minute`: Local minute of the normal daily attempt, default `30`.
 - `retry_minutes`: Delay after incomplete PND data or another failure, default
   `60` minutes.
+- `add_to_energy_dashboard`: Automatically add the imported statistic as grid
+  consumption after the first successful import. Enabled by default.
 - `statistic_id`: Optional stable external statistic ID. Leave empty to create
   `cez_pnd:consumption_<ELM>` automatically.
 - `timezone`: Time zone of PND timestamps, default `Europe/Prague`.
@@ -60,7 +62,13 @@ the default is 06:30 and can be moved later if needed.
 
 ## Energy dashboard
 
-After the first successful import:
+By default, the app automatically adds the statistic to grid consumption after
+the first successful import. It reads the current Energy preferences first,
+preserves every existing source, and makes no change when the same statistic is
+already configured. Both the HA 2025.11 grid format and the newer unified grid
+format are supported.
+
+If `add_to_energy_dashboard` is disabled, configure it manually:
 
 1. Open **Settings → Dashboards → Energy**.
 2. Add grid consumption.
@@ -69,6 +77,10 @@ After the first successful import:
 The statistic has unit `kWh`, energy unit class, and a cumulative sum. Imported
 hours retain their original timestamps, so yesterday's energy appears on
 yesterday rather than on the import date.
+
+Automatic dashboard setup is deliberately non-fatal. If Home Assistant changes
+its preferences schema or rejects the update, imported statistics remain saved
+and the app writes a warning with the statistic ID to its log.
 
 ## Failure behavior
 
