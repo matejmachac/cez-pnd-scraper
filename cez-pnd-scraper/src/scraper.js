@@ -1,7 +1,8 @@
 import { access, chmod, mkdir } from "node:fs/promises";
 import path from "node:path";
+import { DateTime } from "luxon";
 import { chromium } from "playwright";
-import { domTableToCandidate, selectLatestMeasurement } from "./parser.js";
+import { domTableRows, parseDailyRows } from "./parser.js";
 
 export class PndScraper {
   constructor(config, logger) {
@@ -11,7 +12,8 @@ export class PndScraper {
     this.errorScreenshotPath = path.join(config.dataDir, "last-error.png");
   }
 
-  async scrape() {
+  async scrapeYesterday(now = DateTime.now().setZone(this.config.timezone)) {
+    const targetDate = now.minus({ days: 1 }).toISODate();
     await mkdir(this.config.dataDir, { recursive: true });
     const browser = await chromium.launch({
       headless: true,
@@ -25,9 +27,7 @@ export class PndScraper {
         timezoneId: this.config.timezone,
         viewport: { width: 1440, height: 1000 },
       };
-      if (await fileExists(this.storageStatePath)) {
-        contextOptions.storageState = this.storageStatePath;
-      }
+      if (await fileExists(this.storageStatePath)) contextOptions.storageState = this.storageStatePath;
 
       const context = await browser.newContext(contextOptions);
       page = await context.newPage();
@@ -42,14 +42,16 @@ export class PndScraper {
       await context.storageState({ path: this.storageStatePath });
       await chmod(this.storageStatePath, 0o600);
 
-      await page.locator("table tbody tr").first().waitFor({ state: "attached", timeout: 30_000 });
-      const measurement = await this.readLastTablePage(page);
-      this.validateFreshness(measurement);
-      return measurement;
+      const table = await this.findConsumptionTable(page);
+      await this.selectYesterdayAndSearch(page, table, targetDate);
+      const { headers, rows } = await this.readAllPages(table);
+      return parseDailyRows(headers, rows, {
+        elm: this.config.elm,
+        timezone: this.config.timezone,
+        targetDate,
+      });
     } catch (error) {
-      if (page) {
-        await page.screenshot({ path: this.errorScreenshotPath, fullPage: true }).catch(() => {});
-      }
+      if (page) await page.screenshot({ path: this.errorScreenshotPath, fullPage: true }).catch(() => {});
       throw error;
     } finally {
       await browser.close();
@@ -59,72 +61,98 @@ export class PndScraper {
   async loginIfRequired(page) {
     const emailInput = page.locator('input[placeholder="Zadejte svůj e-mail"], input[type="email"]').first();
     const passwordInput = page.locator('input[placeholder="Zadejte své heslo"], input[type="password"]').first();
-
     if (!(await emailInput.isVisible().catch(() => false))) return;
 
     this.logger.info("PND session expired; signing in again");
     const cookieConsent = page.locator("#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowallSelection");
-    if (await cookieConsent.isVisible().catch(() => false)) {
-      await cookieConsent.click();
-    }
+    if (await cookieConsent.isVisible().catch(() => false)) await cookieConsent.click();
     await emailInput.fill(this.config.email);
     await passwordInput.fill(this.config.password);
-    await page.locator('button[type="submit"]').first().click();
+    await Promise.all([
+      page.waitForURL(/\/cezpnd2\/external\/dashboard\/view/, { timeout: 60_000 }),
+      page.locator('button[type="submit"]').first().click(),
+    ]);
   }
 
-  async readLastTablePage(page) {
+  async findConsumptionTable(page) {
     const expectedHeader = this.config.elm
       ? new RegExp(`\\+A/${escapeRegExp(this.config.elm)}.*\\[kW\\]`, "i")
       : /\+A(?:\/|\b).*\[kW\]/i;
     const tables = page.locator('table[id*="table-data"]');
-    const count = await tables.count();
+    await tables.first().waitFor({ state: "attached", timeout: 30_000 });
 
-    for (let index = 0; index < count; index += 1) {
+    for (let index = 0; index < await tables.count(); index += 1) {
       const table = tables.nth(index);
       const headers = (await table.locator("thead th").allTextContents()).map(normalizeText);
-      if (!headers.some((header) => expectedHeader.test(header))) continue;
+      if (headers.some((header) => expectedHeader.test(header))) return table;
+    }
+    throw new Error("No PND table with a matching +A kW column was found");
+  }
 
-      const wrapper = table.locator("xpath=ancestor::div[contains(@class, 'pnd-table')][1]");
-      const pageInput = wrapper.locator("input.pnd-pagination-number").first();
-      const pageInfo = normalizeText(await wrapper.locator(".pnd-pagination-info").innerText());
-      const pagination = parsePaginationInfo(pageInfo);
-      const maxPage = Number(await pageInput.getAttribute("max"));
-      const lastPage = pagination?.lastPage ?? maxPage;
+  async selectYesterdayAndSearch(page, table, targetDate) {
+    const window = table.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' pnd-window ')][1]");
+    const scope = await window.count() ? window : page.locator("body");
+    const yesterday = scope.getByText("Včera", { exact: true }).first();
+    if (!(await yesterday.isVisible().catch(() => false))) {
+      throw new Error('The period option "Včera" was not found near the PND table');
+    }
 
-      if (Number.isFinite(lastPage) && lastPage > 1) {
-          await pageInput.fill(String(lastPage));
+    await yesterday.click();
+    const search = scope.getByRole("button", { name: /VYHLEDAT DATA/i }).first();
+    await search.click();
+    const expectedPrefix = DateTime.fromISO(targetDate).toFormat("dd.MM.yyyy");
+    await page.waitForFunction(
+      ({ tableId, expected }) => {
+        const currentTable = document.getElementById(tableId);
+        return [...(currentTable?.querySelectorAll("tbody tr td:first-child") ?? [])]
+          .some((cell) => cell.textContent?.trim().startsWith(expected));
+      },
+      { tableId: await table.getAttribute("id"), expected: expectedPrefix },
+      { timeout: 60_000 },
+    );
+  }
+
+  async readAllPages(table) {
+    const wrapper = table.locator("xpath=ancestor::div[contains(@class, 'pnd-table')][1]");
+    const pageInput = wrapper.locator("input.pnd-pagination-number").first();
+    const pageInfoLocator = wrapper.locator(".pnd-pagination-info").first();
+    const hasPagination = await pageInput.count() > 0 && await pageInfoLocator.count() > 0;
+    const initialInfo = hasPagination ? parsePaginationInfo(await pageInfoLocator.innerText()) : null;
+    const lastPage = initialInfo?.lastPage ?? 1;
+    const headers = (await table.locator("thead th").allTextContents()).map(normalizeText);
+    const rows = [];
+
+    for (let pageNumber = 1; pageNumber <= lastPage; pageNumber += 1) {
+      if (hasPagination) {
+        const current = Number(await pageInput.inputValue());
+        if (current !== pageNumber) {
+          await pageInput.fill(String(pageNumber));
           await pageInput.press("Enter");
-          await page.waitForTimeout(500);
+          await waitForPaginationPage(
+            table.page(),
+            pageInfoLocator,
+            pageNumber,
+            initialInfo?.pageSize ?? 100,
+          );
+        }
       }
-
-      const rows = await table.locator("tbody tr").evaluateAll((elements) =>
-        elements.map((row) =>
-          Array.from(row.querySelectorAll("td")).map((cell) =>
-            (cell.textContent ?? "").replace(/\s+/g, " ").trim(),
-          ),
-        ),
-      );
-      const measurement = selectLatestMeasurement([domTableToCandidate(headers, rows)], {
-        elm: this.config.elm,
-        timezone: this.config.timezone,
-      });
-      return { ...measurement, source: "pnd-last-table-page" };
+      rows.push(...await table.locator("tbody tr").evaluateAll((elements) =>
+        elements.map((row) => [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? "")),
+      ));
     }
-
-    throw new Error("No default PND table with a matching +A kW column was found");
+    return domTableRows(headers, rows);
   }
+}
 
-  validateFreshness(measurement) {
-    const ageMs = Date.now() - measurement.timestampMs;
-    if (ageMs < -5 * 60_000) {
-      throw new Error(`Newest PND measurement is unexpectedly in the future: ${measurement.timestamp}`);
-    }
-    if (ageMs > this.config.staleAfterMinutes * 60_000) {
-      throw new Error(
-        `Newest PND measurement is stale (${Math.round(ageMs / 60_000)} minutes old): ${measurement.timestamp}`,
-      );
-    }
+async function waitForPaginationPage(page, pageInfo, pageNumber, pageSize) {
+  const expectedStart = (pageNumber - 1) * pageSize + 1;
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const info = parsePaginationInfo(await pageInfo.innerText());
+    if (info?.start === expectedStart) return;
+    await page.waitForTimeout(100);
   }
+  throw new Error(`PND table did not switch to page ${pageNumber}`);
 }
 
 async function fileExists(filePath) {

@@ -8,18 +8,21 @@ configuration:
   elm:
     name: ELM number
     description: Optional meter number. Leave empty only when the account has one +A kW column.
-  interval_minutes:
-    name: Poll interval
-    description: Number of minutes between regular checks.
-  offset_minutes:
-    name: Schedule offset
-    description: Minutes after each interval boundary before the portal is checked.
-  stale_after_minutes:
-    name: Stale threshold
-    description: Measurements older than this are rejected and the MQTT sensor is made unavailable.
+  import_hour:
+    name: Daily import hour
+    description: Local hour of the regular attempt to import yesterday.
+  import_minute:
+    name: Daily import minute
+    description: Local minute of the regular import attempt.
+  retry_minutes:
+    name: Retry interval
+    description: Minutes until another attempt when yesterday's data is still incomplete.
+  statistic_id:
+    name: Statistic ID
+    description: Optional stable ID. Empty creates cez_pnd:consumption_<ELM>.
   timezone:
     name: Time zone
-    description: IANA time zone used to interpret PND timestamps.
+    description: IANA time zone used to interpret PND timestamps and schedule imports.
   log_level:
     name: Log level
     description: Verbosity of app logs.

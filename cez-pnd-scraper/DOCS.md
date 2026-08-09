@@ -1,58 +1,82 @@
 # ČEZ PND Scraper
 
-This Home Assistant OS app reads the data already loaded by the default PND
-table and it does not download CSV files. Playwright finds the default data
-table, reads pagination text such as `1–100 z 2976`, calculates the last page,
-enters that page number into the adjacent numeric field, presses Enter, and
-selects the newest valid `+A` value in `kW` from the final page.
+This Home Assistant OS app imports delayed ČEZ Distribuce PND data into Home
+Assistant long-term statistics. It does not create a live power sensor and does
+not use MQTT.
 
-## Prerequisites
+On each attempt the app starts headless Chromium, signs in when necessary,
+selects **Včera** in the dashboard window containing the `+A [kW]` table,
+clicks **VYHLEDAT DATA**, reads every table page, and closes Chromium. The
+lightweight Node.js scheduler remains idle between attempts.
 
-- Home Assistant OS on an `amd64` machine.
-- The Mosquitto broker app installed and configured.
+## Requirements
+
+- Home Assistant OS on an `amd64` machine, Core 2025.11 or newer.
 - A working ČEZ Distribuce PND account.
-- A dashboard window containing the default data table and a `+A` column in
-  `kW`. No particular date range or table page is required.
+- A PND dashboard window with a 15-minute `+A` column in `kW`.
+
+No MQTT broker, custom integration, helper, external server, or long-lived
+Home Assistant token is required. The app receives scoped Home Assistant API
+access from Supervisor.
 
 ## Configuration
 
 - `email`: PND login email.
-- `password`: PND login password. Home Assistant stores this as a password
-  option in `/data/options.json`; it is not part of the Git repository.
-- `elm`: Meter number used to choose a column such as `+A/1234567890 [kW]`.
-  Leave empty only if exactly one matching column exists.
-- `interval_minutes`: Regular polling interval, default `15`.
-- `offset_minutes`: Delay after each interval boundary, default `3`.
-- `stale_after_minutes`: Reject older portal data, default `60`.
+- `password`: PND login password. It is a masked app option stored in the app's
+  private `/data/options.json`, never in this Git repository.
+- `elm`: Meter number used to select a column such as
+  `+A/1234567890 [kW]`. Leave empty only if exactly one matching column exists.
+- `import_hour`: Local hour of the normal daily attempt, default `6`.
+- `import_minute`: Local minute of the normal daily attempt, default `30`.
+- `retry_minutes`: Delay after incomplete PND data or another failure, default
+  `60` minutes.
+- `statistic_id`: Optional stable external statistic ID. Leave empty to create
+  `cez_pnd:consumption_<ELM>` automatically.
 - `timezone`: Time zone of PND timestamps, default `Europe/Prague`.
 - `log_level`: `debug`, `info`, `warn`, or `error`.
 
-The browser login session is saved in the app's persistent `/data` volume. A
-new headless Chromium process is still started and closed for every poll. When
-the saved session expires, the app signs in again and refreshes it.
+When started before the configured daily time, the app waits for that time;
+when started later, it attempts the import immediately. This delay is important
+because PND displays zero placeholders before measurements arrive. A successful
+import is recorded in `/data/state.json`; restarting the app therefore does not
+add the same day twice. The saved browser session is also private to `/data`.
 
-## Home Assistant entities
+## Validation and conversion
 
-MQTT Discovery creates `sensor.cez_pnd_<elm>_power` with:
+PND timestamps mark the end of each 15-minute interval. Every value in `kW` is
+converted to energy using `kW × 0.25 = kWh`, then grouped into Home Assistant's
+hourly long-term statistics.
 
-- unit `kW`
-- device class `power`
-- state class `measurement`
-- forced updates, so equal consecutive 15-minute values remain measurements
+The day is imported only when every expected timestamp is present:
 
-Create an **Integral** helper in Home Assistant:
+- 96 intervals on a normal day,
+- 92 when daylight saving time starts,
+- 100 when daylight saving time ends.
 
-- input sensor: the ČEZ PND power sensor
-- method: `Left`
-- integration time: `Hours`
-- metric prefix: none (the source is already in `kW`)
-- max sub-interval: `15 minutes`
+A numeric zero is accepted as a real measurement. Missing timestamps trigger a
+retry. Because a portal placeholder and a true zero have the same numeric value,
+choose an import time late enough for PND to have finalized the previous day;
+the default is 06:30 and can be moved later if needed.
 
-The resulting `kWh` entity can be selected in the Energy dashboard.
+## Energy dashboard
+
+After the first successful import:
+
+1. Open **Settings → Dashboards → Energy**.
+2. Add grid consumption.
+3. Select the external statistic named **ČEZ PND consumption `<ELM>`**.
+
+The statistic has unit `kWh`, energy unit class, and a cumulative sum. Imported
+hours retain their original timestamps, so yesterday's energy appears on
+yesterday rather than on the import date.
 
 ## Failure behavior
 
-The app publishes MQTT availability `offline` when login, scraping, parsing, or
-staleness validation fails. It retries with exponential backoff up to the normal
-poll interval. A screenshot of the most recent browser failure is stored as
-`/data/last-error.png` inside the app data volume. Credentials are never logged.
+An incomplete day, expired credentials, changed portal markup, or unavailable
+Home Assistant API leaves the day unmodified and schedules another attempt.
+The most recent browser failure screenshot is stored as
+`/data/last-error.png`. Credentials are never written to logs.
+
+Version 0.2 imports only the immediately preceding calendar day. If the app is
+stopped for more than one full day, older missed days are not backfilled
+automatically yet.

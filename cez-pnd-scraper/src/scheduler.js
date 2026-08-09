@@ -1,13 +1,16 @@
-export function nextAlignedRun(nowMs, intervalMinutes, offsetMinutes) {
-  const intervalMs = intervalMinutes * 60_000;
-  const offsetMs = offsetMinutes * 60_000;
-  return Math.floor((nowMs - offsetMs) / intervalMs + 1) * intervalMs + offsetMs;
+import { DateTime } from "luxon";
+
+export function nextDailyRun(nowMs, hour, minute, timezone = "Europe/Prague") {
+  const now = DateTime.fromMillis(nowMs, { zone: timezone });
+  let candidate = now.startOf("day").set({ hour, minute });
+  if (candidate.toMillis() <= nowMs) candidate = candidate.plus({ days: 1 });
+  return candidate.toMillis();
 }
 
-export function retryDelayMs(failureCount, intervalMinutes) {
-  const maximum = intervalMinutes * 60_000;
-  const exponential = 60_000 * 2 ** Math.max(0, failureCount - 1);
-  return Math.min(exponential, maximum);
+export function millisecondsUntilDailyWindow(nowMs, hour, minute, timezone = "Europe/Prague") {
+  const now = DateTime.fromMillis(nowMs, { zone: timezone });
+  const today = now.startOf("day").set({ hour, minute });
+  return Math.max(0, today.toMillis() - nowMs);
 }
 
 export function delay(ms, signal) {

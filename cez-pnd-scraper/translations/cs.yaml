@@ -8,18 +8,21 @@ configuration:
   elm:
     name: Číslo ELM
     description: Volitelné číslo elektroměru. Prázdné ponechte jen u účtu s jediným sloupcem +A v kW.
-  interval_minutes:
-    name: Interval kontroly
-    description: Počet minut mezi pravidelnými kontrolami.
-  offset_minutes:
-    name: Posun plánování
-    description: Počet minut po hranici intervalu, kdy se portál zkontroluje.
-  stale_after_minutes:
-    name: Limit zastarání
-    description: Starší měření se odmítne a MQTT senzor se označí jako nedostupný.
+  import_hour:
+    name: Hodina denního importu
+    description: Místní hodina pravidelného pokusu o import včerejšího dne.
+  import_minute:
+    name: Minuta denního importu
+    description: Místní minuta pravidelného pokusu o import.
+  retry_minutes:
+    name: Interval opakování
+    description: Počet minut do dalšího pokusu, když včerejší data ještě nejsou kompletní.
+  statistic_id:
+    name: ID statistiky
+    description: Volitelné stabilní ID. Prázdná hodnota vytvoří cez_pnd:consumption_<ELM>.
   timezone:
     name: Časová zóna
-    description: IANA časová zóna pro interpretaci časů z PND.
+    description: IANA časová zóna pro interpretaci časů z PND a plánování importu.
   log_level:
     name: Úroveň logování
     description: Podrobnost logů aplikace.

@@ -1,17 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextAlignedRun, retryDelayMs } from "../src/scheduler.js";
+import { millisecondsUntilDailyWindow, nextDailyRun } from "../src/scheduler.js";
 
-test("aligns runs to three minutes after each quarter", () => {
-  const now = Date.parse("2026-08-09T10:04:00Z");
+test("schedules the same local day before the configured time", () => {
+  const now = Date.parse("2026-08-09T03:00:00Z");
   assert.equal(
-    new Date(nextAlignedRun(now, 15, 3)).toISOString(),
-    "2026-08-09T10:18:00.000Z",
+    new Date(nextDailyRun(now, 6, 30, "Europe/Prague")).toISOString(),
+    "2026-08-09T04:30:00.000Z",
   );
 });
 
-test("caps exponential retries at the normal interval", () => {
-  assert.equal(retryDelayMs(1, 15), 60_000);
-  assert.equal(retryDelayMs(4, 15), 480_000);
-  assert.equal(retryDelayMs(10, 15), 900_000);
+test("schedules tomorrow after the configured time", () => {
+  const now = Date.parse("2026-08-09T07:00:00Z");
+  assert.equal(
+    new Date(nextDailyRun(now, 6, 30, "Europe/Prague")).toISOString(),
+    "2026-08-10T04:30:00.000Z",
+  );
+});
+
+test("does not allow an immediate startup import before the daily window", () => {
+  assert.equal(
+    millisecondsUntilDailyWindow(Date.parse("2026-08-09T00:00:00Z"), 6, 30, "Europe/Prague"),
+    4.5 * 60 * 60_000,
+  );
+  assert.equal(
+    millisecondsUntilDailyWindow(Date.parse("2026-08-09T07:00:00Z"), 6, 30, "Europe/Prague"),
+    0,
+  );
 });

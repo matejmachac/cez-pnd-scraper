@@ -1,16 +1,16 @@
 name: "ČEZ PND Scraper"
-version: "0.1.0"
+version: "0.2.0"
 slug: "cez_pnd_scraper"
-description: "Publishes the newest 15-minute ČEZ PND power reading to Home Assistant via MQTT."
+description: "Imports delayed ČEZ PND consumption into Home Assistant long-term statistics."
 arch:
   - amd64
 startup: application
 boot: auto
 stage: experimental
+homeassistant: "2025.11.0"
 timeout: 90
 tmpfs: true
-services:
-  - mqtt:need
+homeassistant_api: true
 ports:
   8099/tcp: null
 watchdog: "http://[HOST]:[PORT:8099]/health"
@@ -18,17 +18,19 @@ options:
   email: null
   password: null
   elm: ""
-  interval_minutes: 15
-  offset_minutes: 3
-  stale_after_minutes: 60
+  import_hour: 6
+  import_minute: 30
+  retry_minutes: 60
+  statistic_id: ""
   timezone: "Europe/Prague"
   log_level: "info"
 schema:
   email: email
   password: password
   elm: str
-  interval_minutes: "int(5,120)"
-  offset_minutes: "int(0,119)"
-  stale_after_minutes: "int(15,360)"
+  import_hour: "int(0,23)"
+  import_minute: "int(0,59)"
+  retry_minutes: "int(15,360)"
+  statistic_id: str
   timezone: str
   log_level: "list(debug|info|warn|error)"

@@ -1,100 +1,125 @@
 import path from "node:path";
+import { DateTime } from "luxon";
 import { loadConfig } from "./config.js";
+import { HomeAssistantClient } from "./home-assistant.js";
 import { startHealthServer } from "./health.js";
+import {
+  buildHourlyStatistics,
+  createStatisticMetadata,
+  defaultStatisticId,
+} from "./importer.js";
 import { createLogger } from "./logger.js";
-import { MqttPublisher } from "./mqtt-publisher.js";
 import { PndScraper } from "./scraper.js";
-import { delay, nextAlignedRun, retryDelayMs } from "./scheduler.js";
+import { delay, millisecondsUntilDailyWindow, nextDailyRun } from "./scheduler.js";
 import { StateStore } from "./state-store.js";
-import { getMqttService } from "./supervisor.js";
 
 const config = await loadConfig();
 const logger = createLogger(config.logLevel);
-const status = {
-  running: false,
-  stopping: false,
-  lastSuccess: null,
-  lastError: null,
-};
+const status = { running: false, stopping: false, lastSuccess: null, lastError: null };
 const healthServer = startHealthServer(config.healthPort, status);
 const abortController = new AbortController();
 const stateStore = new StateStore(path.join(config.dataDir, "state.json"));
-const mqttService = await getMqttService();
-const publisher = new MqttPublisher(mqttService, {
-  elm: config.elm,
-  staleAfterMinutes: config.staleAfterMinutes,
-  logger,
-});
 const scraper = new PndScraper(config, logger);
 
 process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
-await publisher.connect();
-logger.info("ČEZ PND scraper started", {
-  intervalMinutes: config.intervalMinutes,
-  offsetMinutes: config.offsetMinutes,
+logger.info("ČEZ PND delayed statistics importer started", {
+  schedule: `${String(config.importHour).padStart(2, "0")}:${String(config.importMinute).padStart(2, "0")}`,
+  retryMinutes: config.retryMinutes,
   elm: config.elm || "auto",
 });
 
-let failures = 0;
-let firstRun = true;
-let publishedThisProcess = false;
-
+let retrying = false;
 while (!status.stopping) {
-  if (!firstRun) {
-    const waitMs = failures
-      ? retryDelayMs(failures, config.intervalMinutes)
-      : nextAlignedRun(Date.now(), config.intervalMinutes, config.offsetMinutes) - Date.now();
-    logger.debug("Waiting for next scrape", { seconds: Math.ceil(waitMs / 1_000), failures });
-    await delay(waitMs, abortController.signal).catch(() => {});
+  const windowWaitMs = millisecondsUntilDailyWindow(
+    Date.now(),
+    config.importHour,
+    config.importMinute,
+    config.timezone,
+  );
+  if (windowWaitMs > 0) {
+    logger.debug("Waiting for today's safe import window", {
+      seconds: Math.ceil(windowWaitMs / 1_000),
+    });
+    await delay(windowWaitMs, abortController.signal).catch(() => {});
     if (status.stopping) break;
   }
-  firstRun = false;
+
   status.running = true;
-
   try {
-    const measurement = await scraper.scrape();
-    const previous = await stateStore.load();
+    const now = DateTime.now().setZone(config.timezone);
+    const targetDate = now.minus({ days: 1 }).toISODate();
+    const state = await stateStore.load();
 
-    if (!publishedThisProcess || previous.timestamp !== measurement.timestamp) {
-      await publisher.publishMeasurement(measurement);
-      publishedThisProcess = true;
-      await stateStore.save({
-        timestamp: measurement.timestamp,
-        powerKw: measurement.powerKw,
-        publishedAt: new Date().toISOString(),
-      });
-      logger.info("Published new PND measurement", {
-        timestamp: measurement.timestamp,
-        powerKw: measurement.powerKw,
-      });
+    if (state.lastImportedDate === targetDate) {
+      retrying = false;
+      logger.debug("Yesterday is already imported", { targetDate });
     } else {
-      await publisher.publishAvailability(true);
-      logger.info("PND has no newer measurement yet", { timestamp: measurement.timestamp });
+      const profile = await scraper.scrapeYesterday(now);
+      const statisticId = config.statisticId || defaultStatisticId(profile.meterId);
+      const client = new HomeAssistantClient({
+        url: config.homeAssistantWebSocketUrl,
+        token: config.supervisorToken,
+        logger,
+      });
+
+      try {
+        await client.connect();
+        const dayStart = DateTime.fromISO(targetDate, { zone: config.timezone }).startOf("day");
+        const baseSum = await client.getLatestSum(statisticId, dayStart.toUTC().toISO());
+        const batch = buildHourlyStatistics(profile, { timezone: config.timezone, baseSum });
+        await client.importStatistics(
+          createStatisticMetadata(statisticId, `ČEZ PND consumption ${profile.meterId}`),
+          batch.stats,
+        );
+        await stateStore.save({
+          lastImportedDate: targetDate,
+          statisticId,
+          meterId: profile.meterId,
+          cumulativeSum: batch.cumulativeSum,
+          lastImportAt: new Date().toISOString(),
+          lastDayEnergyKwh: batch.energyKwh,
+        });
+        logger.info("Imported complete PND day into Home Assistant statistics", {
+          targetDate,
+          statisticId,
+          intervals: batch.intervalCount,
+          hours: batch.hourCount,
+          energyKwh: batch.energyKwh,
+        });
+      } finally {
+        client.close();
+      }
+      retrying = false;
     }
 
-    failures = 0;
     status.lastSuccess = new Date().toISOString();
     status.lastError = null;
   } catch (error) {
-    failures += 1;
+    retrying = true;
     status.lastError = error.message;
-    await publisher.publishAvailability(false).catch(() => {});
-    logger.error("Scrape failed", { error: error.message, failures });
+    logger.error("Daily import failed; it will be retried", {
+      error: error.message,
+      retryMinutes: config.retryMinutes,
+    });
   } finally {
     status.running = false;
   }
+
+  const waitMs = retrying
+    ? config.retryMinutes * 60_000
+    : nextDailyRun(Date.now(), config.importHour, config.importMinute, config.timezone) - Date.now();
+  logger.debug("Waiting for next import attempt", { seconds: Math.ceil(waitMs / 1_000), retrying });
+  await delay(waitMs, abortController.signal).catch(() => {});
 }
 
-await publisher.publishAvailability(false).catch(() => {});
-await publisher.close();
 await new Promise((resolve) => healthServer.close(resolve));
-logger.info("ČEZ PND scraper stopped");
+logger.info("ČEZ PND importer stopped");
 
 function stop(signal) {
   if (status.stopping) return;
-  logger.info("Stopping scraper", { signal });
+  logger.info("Stopping importer", { signal });
   status.stopping = true;
   abortController.abort(new Error(signal));
 }

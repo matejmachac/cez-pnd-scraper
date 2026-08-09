@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Replaced 15-minute MQTT publishing with delayed daily statistics import.
+- Selects the PND period `Včera` before reading the `+A [kW]` table.
+- Validates 96/92/100 intervals, including daylight-saving transitions.
+- Converts quarter-hour power samples into cumulative hourly kWh statistics.
+- Imports historical timestamps through the Home Assistant WebSocket API.
+- Retries incomplete days without treating zero consumption as missing data.
+
 ## 0.1.0
 
 - Initial private release.

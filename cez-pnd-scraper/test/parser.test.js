@@ -1,15 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  domTableToCandidate,
   parseCzechNumber,
+  parseDailyRows,
   parsePndTimestamp,
-  selectLatestMeasurement,
+  parsePndTimestampVariants,
 } from "../src/parser.js";
 
-test("parses Czech decimal values", () => {
+test("parses Czech decimal values and valid zero", () => {
   assert.equal(parseCzechNumber("0,492"), 0.492);
   assert.equal(parseCzechNumber("1 234,56"), 1234.56);
+  assert.equal(parseCzechNumber("0,0"), 0);
   assert.equal(parseCzechNumber("-"), null);
 });
 
@@ -20,55 +21,35 @@ test("normalizes PND 24:00 to the following midnight", () => {
   );
 });
 
-test("selects the newest +A measurement for the configured ELM", () => {
-  const candidates = [
-    {
-      data: {
-        columns: [
-          { id: "1001", name: "Datum" },
-          { id: "2001", name: "+A/1234567890", unit: "kW" },
-        ],
-        values: [
-          { "1001": { v: "01.08.2026 00:15" }, "2001": { v: "0,492" } },
-          { "1001": { v: "01.08.2026 00:30" }, "2001": { v: "0,454" } },
-        ],
-      },
-    },
-  ];
-
+test("returns both offsets for the repeated autumn hour", () => {
   assert.deepEqual(
-    selectLatestMeasurement(candidates, { elm: "1234567890", timezone: "Europe/Prague" }),
-    {
-      timestamp: "2026-08-01T00:30:00.000+02:00",
-      timestampMs: 1785537000000,
-      powerKw: 0.454,
-      column: "+A/1234567890",
-      source: "pnd-data-response",
-    },
+    parsePndTimestampVariants("25.10.2026 02:15", "Europe/Prague").map((item) => item.toISO()),
+    ["2026-10-25T02:15:00.000+02:00", "2026-10-25T02:15:00.000+01:00"],
   );
+});
+
+test("parses all daily rows and picks the configured ELM", () => {
+  const profile = parseDailyRows(
+    ["Datum", "+A/1234567890 [kW]"],
+    [
+      ["01.08.2026 00:15", "0,492"],
+      ["01.08.2026 00:30", "0,0"],
+      ["02.08.2026 00:15", "9,9"],
+    ],
+    { elm: "1234567890", timezone: "Europe/Prague", targetDate: "2026-08-01" },
+  );
+  assert.equal(profile.meterId, "1234567890");
+  assert.equal(profile.intervals.length, 2);
+  assert.equal(profile.intervals[1].powerKw, 0);
 });
 
 test("requires ELM when multiple +A columns exist", () => {
-  const candidates = [{ data: {
-    columns: [
-      { id: "date", name: "Datum" },
-      { id: "a", name: "+A/1", unit: "kW" },
-      { id: "b", name: "+A/2", unit: "kW" },
-    ],
-    values: [],
-  } }];
-  assert.throws(() => selectLatestMeasurement(candidates), /configure the ELM/);
-});
-
-test("converts the visible last table page to the PND response shape", () => {
-  const candidate = domTableToCandidate(
-    ["Datum", "+A/1234567890 [kW]"],
-    [["09.08.2026 10:15", "0,321"]],
+  assert.throws(
+    () => parseDailyRows(
+      ["Datum", "+A/1 [kW]", "+A/2 [kW]"],
+      [],
+      { targetDate: "2026-08-01" },
+    ),
+    /configure the ELM/,
   );
-  const measurement = selectLatestMeasurement([candidate], {
-    elm: "1234567890",
-    timezone: "Europe/Prague",
-  });
-  assert.equal(measurement.powerKw, 0.321);
-  assert.equal(measurement.timestamp, "2026-08-09T10:15:00.000+02:00");
 });

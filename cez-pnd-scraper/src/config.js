@@ -14,9 +14,10 @@ export async function loadConfig(optionsPath = process.env.OPTIONS_PATH ?? DEFAU
     email: process.env.PND_EMAIL ?? options.email,
     password: process.env.PND_PASSWORD ?? options.password,
     elm: String(process.env.PND_ELM ?? options.elm ?? "").trim(),
-    intervalMinutes: toInteger(process.env.POLL_INTERVAL_MINUTES ?? options.interval_minutes, 15),
-    offsetMinutes: toInteger(process.env.POLL_OFFSET_MINUTES ?? options.offset_minutes, 3),
-    staleAfterMinutes: toInteger(process.env.STALE_AFTER_MINUTES ?? options.stale_after_minutes, 60),
+    importHour: toInteger(process.env.IMPORT_HOUR ?? options.import_hour, 6),
+    importMinute: toInteger(process.env.IMPORT_MINUTE ?? options.import_minute, 30),
+    retryMinutes: toInteger(process.env.RETRY_MINUTES ?? options.retry_minutes, 60),
+    statisticId: String(process.env.STATISTIC_ID ?? options.statistic_id ?? "").trim(),
     timezone: process.env.TZ ?? options.timezone ?? "Europe/Prague",
     logLevel: process.env.LOG_LEVEL ?? options.log_level ?? "info",
     dashboardUrl:
@@ -24,13 +25,16 @@ export async function loadConfig(optionsPath = process.env.OPTIONS_PATH ?? DEFAU
       "https://pnd.cezdistribuce.cz/cezpnd2/external/dashboard/view",
     dataDir: process.env.DATA_DIR ?? "/data",
     healthPort: toInteger(process.env.HEALTH_PORT, 8099),
+    homeAssistantWebSocketUrl:
+      process.env.HA_WEBSOCKET_URL ?? "ws://supervisor/core/websocket",
+    supervisorToken: process.env.SUPERVISOR_TOKEN,
   };
 
   if (!config.email) throw new Error("Missing required PND email");
   if (!config.password) throw new Error("Missing required PND password");
-  if (config.offsetMinutes >= config.intervalMinutes) {
-    throw new Error("offset_minutes must be lower than interval_minutes");
-  }
+  if (config.importHour < 0 || config.importHour > 23) throw new Error("import_hour must be 0-23");
+  if (config.importMinute < 0 || config.importMinute > 59) throw new Error("import_minute must be 0-59");
+  if (!config.supervisorToken) throw new Error("SUPERVISOR_TOKEN is missing");
   if (!new Set(["debug", "info", "warn", "error"]).has(config.logLevel)) {
     throw new Error(`Unsupported log level: ${config.logLevel}`);
   }

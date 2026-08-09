@@ -7,15 +7,20 @@ export function parseCzechNumber(value) {
     .replace(/\u00a0/g, "")
     .replace(/\s/g, "")
     .replace(",", ".");
+  if (!normalized || normalized === "-") return null;
   const parsed = Number.parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function parsePndTimestamp(value, zone = "Europe/Prague") {
-  if (!value) return null;
+  return parsePndTimestampVariants(value, zone)[0] ?? null;
+}
+
+export function parsePndTimestampVariants(value, zone = "Europe/Prague") {
+  if (!value) return [];
   const raw = String(value).trim();
   const match = raw.match(/^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
-  if (!match) return null;
+  if (!match) return [];
 
   const [, date, hourText, minute, second = "00"] = match;
   const hour = Number(hourText);
@@ -26,70 +31,69 @@ export function parsePndTimestamp(value, zone = "Europe/Prague") {
     { zone },
   );
   if (hour === 24) parsed = parsed.plus({ days: 1 });
-  return parsed.isValid ? parsed : null;
+  if (!parsed.isValid) return [];
+  return parsed.getPossibleOffsets().sort((left, right) => left.toMillis() - right.toMillis());
 }
 
-export function selectLatestMeasurement(candidates, { elm = "", timezone = "Europe/Prague" } = {}) {
-  const matches = [];
+export function parseDailyRows(headers, rows, {
+  elm = "",
+  timezone = "Europe/Prague",
+  targetDate,
+} = {}) {
+  const dateColumn = headers.findIndex((header) => /datum|date/i.test(header));
+  const powerColumns = headers
+    .map((header, index) => ({ header, index }))
+    .filter(({ header }) => /\+A(?:\/|\b)/i.test(header) && /\[?kW\]?/i.test(header) && (!elm || header.includes(elm)));
 
-  for (const candidate of candidates) {
-    const columns = candidate?.data?.columns;
-    const values = candidate?.data?.values;
-    if (!Array.isArray(columns) || !Array.isArray(values)) continue;
+  if (dateColumn < 0) throw new Error("PND table has no date column");
+  if (powerColumns.length === 0) throw new Error("PND table has no matching +A column in kW");
+  if (!elm && powerColumns.length > 1) {
+    throw new Error("Multiple +A kW columns found; configure the ELM number");
+  }
 
-    const dateColumn = columns.find((column) =>
-      /datum|date/i.test(`${column.name ?? ""} ${column.id ?? ""}`),
-    ) ?? columns[0];
-    const powerColumns = columns.filter((column) => {
-      const label = `${column.name ?? ""} ${column.unit ?? ""}`;
-      return /\+A(?:\/|\b)/i.test(label) && /kW/i.test(label) && (!elm || label.includes(elm));
+  const powerColumn = powerColumns[0];
+  const occurrences = new Map();
+  const intervals = [];
+
+  for (const cells of rows) {
+    const timestampRaw = cells[dateColumn];
+    const variants = parsePndTimestampVariants(timestampRaw, timezone);
+    const powerKw = parseCzechNumber(cells[powerColumn.index]);
+    if (variants.length === 0 || powerKw === null) continue;
+
+    const occurrence = occurrences.get(timestampRaw) ?? 0;
+    occurrences.set(timestampRaw, occurrence + 1);
+    const timestamp = variants[Math.min(occurrence, variants.length - 1)];
+    intervals.push({
+      end: timestamp.toISO(),
+      endMs: timestamp.toMillis(),
+      powerKw,
     });
-
-    if (powerColumns.length === 0) continue;
-    if (!elm && powerColumns.length > 1) {
-      throw new Error("Multiple +A kW columns found; configure the ELM number");
-    }
-
-    const powerColumn = powerColumns[0];
-    for (const row of values) {
-      const timestampRaw = unwrapCell(row?.[dateColumn.id]);
-      const powerRaw = unwrapCell(row?.[powerColumn.id]);
-      const timestamp = parsePndTimestamp(timestampRaw, timezone);
-      const powerKw = parseCzechNumber(powerRaw);
-      if (!timestamp || powerKw === null) continue;
-      matches.push({
-        timestamp: timestamp.toISO(),
-        timestampMs: timestamp.toMillis(),
-        powerKw,
-        column: `${powerColumn.name ?? powerColumn.id}`,
-        source: "pnd-data-response",
-      });
-    }
   }
 
-  if (matches.length === 0) {
-    throw new Error("No valid +A kW measurements found in PND table responses");
-  }
-
-  return matches.sort((a, b) => b.timestampMs - a.timestampMs)[0];
+  const dayStart = DateTime.fromISO(targetDate, { zone: timezone }).startOf("day");
+  const dayEnd = dayStart.plus({ days: 1 });
+  return {
+    targetDate,
+    meterId: extractMeterId(powerColumn.header),
+    column: powerColumn.header,
+    intervals: intervals
+      .filter(({ endMs }) => endMs > dayStart.toMillis() && endMs <= dayEnd.toMillis())
+      .sort((left, right) => left.endMs - right.endMs),
+  };
 }
 
-export function domTableToCandidate(headers, rows) {
-  const columns = headers.map((label, index) => {
-    const unitMatch = String(label).match(/\[([^\]]+)\]\s*$/);
-    return {
-      id: String(index),
-      name: String(label).replace(/\s*\[[^\]]+\]\s*$/, "").trim(),
-      unit: unitMatch?.[1] ?? null,
-    };
-  });
-  const values = rows.map((cells) =>
-    Object.fromEntries(cells.map((value, index) => [String(index), { v: value }])),
-  );
-  return { data: { columns, values } };
+export function domTableRows(headers, rows) {
+  return {
+    headers: headers.map(normalizeText),
+    rows: rows.map((cells) => cells.map(normalizeText)),
+  };
 }
 
-function unwrapCell(value) {
-  if (value && typeof value === "object" && "v" in value) return value.v;
-  return value;
+function extractMeterId(header) {
+  return String(header).match(/\+A\/([^\s\[]+)/i)?.[1] ?? "default";
+}
+
+function normalizeText(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
 }
