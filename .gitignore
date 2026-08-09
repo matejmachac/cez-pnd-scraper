@@ -1,0 +1,8 @@
+.DS_Store
+node_modules/
+coverage/
+*.log
+.env
+browser-state.json
+state.json
+last-error.png

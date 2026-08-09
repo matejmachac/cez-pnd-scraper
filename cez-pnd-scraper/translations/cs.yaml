@@ -1,0 +1,25 @@
+configuration:
+  email:
+    name: PND e-mail
+    description: E-mail používaný pro přihlášení do portálu ČEZ Distribuce PND.
+  password:
+    name: PND heslo
+    description: Heslo používané pro přihlášení do portálu ČEZ Distribuce PND.
+  elm:
+    name: Číslo ELM
+    description: Volitelné číslo elektroměru. Prázdné ponechte jen u účtu s jediným sloupcem +A v kW.
+  interval_minutes:
+    name: Interval kontroly
+    description: Počet minut mezi pravidelnými kontrolami.
+  offset_minutes:
+    name: Posun plánování
+    description: Počet minut po hranici intervalu, kdy se portál zkontroluje.
+  stale_after_minutes:
+    name: Limit zastarání
+    description: Starší měření se odmítne a MQTT senzor se označí jako nedostupný.
+  timezone:
+    name: Časová zóna
+    description: IANA časová zóna pro interpretaci časů z PND.
+  log_level:
+    name: Úroveň logování
+    description: Podrobnost logů aplikace.

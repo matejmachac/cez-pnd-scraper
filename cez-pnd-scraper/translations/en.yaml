@@ -1,0 +1,25 @@
+configuration:
+  email:
+    name: PND email
+    description: Email address used to sign in to the ČEZ Distribuce PND portal.
+  password:
+    name: PND password
+    description: Password used to sign in to the ČEZ Distribuce PND portal.
+  elm:
+    name: ELM number
+    description: Optional meter number. Leave empty only when the account has one +A kW column.
+  interval_minutes:
+    name: Poll interval
+    description: Number of minutes between regular checks.
+  offset_minutes:
+    name: Schedule offset
+    description: Minutes after each interval boundary before the portal is checked.
+  stale_after_minutes:
+    name: Stale threshold
+    description: Measurements older than this are rejected and the MQTT sensor is made unavailable.
+  timezone:
+    name: Time zone
+    description: IANA time zone used to interpret PND timestamps.
+  log_level:
+    name: Log level
+    description: Verbosity of app logs.
