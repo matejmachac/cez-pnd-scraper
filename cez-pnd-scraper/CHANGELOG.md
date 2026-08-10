@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- Select the 15-minute PND interval type through the dashboard's Vue multiselect before locating its table.
+
 ## 0.3.2
 
 - Avoid Playwright's selector engine on the PND dashboard.

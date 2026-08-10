@@ -43,6 +43,7 @@ export class PndScraper {
       // PND modifies browser globals in a way that breaks Playwright's selector
       // evaluator. Keep all dashboard interaction on native DOM APIs instead of
       // selector-based Playwright calls.
+      await this.selectQuarterHourInterval(page);
       const tableId = await this.findConsumptionTable(page);
       await this.selectYesterdayAndSearch(page, tableId, targetDate);
       const { headers, rows } = await this.readAllPages(page, tableId);
@@ -109,6 +110,35 @@ export class PndScraper {
 
     if (!result) throw new Error("No PND table with a matching +A kW column was found");
     return result;
+  }
+
+  async selectQuarterHourInterval(page) {
+    const result = await pollForValue(page, async () => page.evaluate(() => {
+      const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+      const isQuarterHour = (value) => /\b15\s*(?:min(?:ut(?:a|y)?)?\.?|m)\b|čtvrt(?:hodin|hod)/i.test(value);
+      const input = document.querySelector('input[id$="-intervalType"]');
+      if (!input) return { status: "not-present" };
+
+      const multiselect = input.closest(".multiselect") ?? input.parentElement;
+      const selected = normalize(multiselect?.querySelector(".multiselect__single")?.textContent);
+      if (isQuarterHour(selected)) return { status: "selected" };
+
+      input.focus();
+      input.click();
+      const options = [...(multiselect?.querySelectorAll(".multiselect__option") ?? [])];
+      const option = options.find((element) => isQuarterHour(normalize(element.textContent)));
+      if (option) {
+        option.click();
+        return { status: "selected" };
+      }
+      if (options.length) return { status: "unmatched", options: options.map((element) => normalize(element.textContent)) };
+      return null;
+    }), 10_000);
+
+    if (!result || result.status === "unmatched") {
+      const options = result?.options?.join(", ") || "none";
+      throw new Error(`PND interval type does not offer a 15-minute option (available: ${options})`);
+    }
   }
 
   async selectYesterdayAndSearch(page, tableId, targetDate) {

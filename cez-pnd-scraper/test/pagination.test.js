@@ -21,3 +21,9 @@ test("scraper avoids the Playwright selector engine broken by the PND dashboard"
   const source = await readFile(new URL("../src/scraper.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\.(?:locator|getByText|getByRole|getByLabel)\s*\(/);
 });
+
+test("scraper selects the PND 15-minute interval from its multiselect input", async () => {
+  const source = await readFile(new URL("../src/scraper.js", import.meta.url), "utf8");
+  assert.match(source, /input\[id\$="-intervalType"\]/);
+  assert.match(source, /multiselect__option/);
+});
