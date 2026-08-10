@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseCzechNumber,
   parseDailyRows,
+  parsePndCsv,
   parsePndTimestamp,
   parsePndTimestampVariants,
 } from "../src/parser.js";
@@ -52,4 +53,13 @@ test("requires ELM when multiple +A columns exist", () => {
     ),
     /configure the ELM/,
   );
+});
+
+test("parses PND CSV and excludes unknown placeholder values", () => {
+  const profile = parsePndCsv(
+    '"Datum";"+A/1234567890 [kW]";"Status"\n"01.08.2026 00:15:00";0,492;"naměřená data OK"\n"01.08.2026 00:30:00";0;"neznámá hodnota"\n',
+    { elm: "1234567890", timezone: "Europe/Prague", targetDate: "2026-08-01" },
+  );
+  assert.equal(profile.intervals.length, 1);
+  assert.equal(profile.intervals[0].powerKw, 0.492);
 });

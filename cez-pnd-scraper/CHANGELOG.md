@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4
+
+- Download the daily CSV export instead of reading the dashboard table and its pagination.
+- Select `Včera` from the dashboard's interval Vue multiselect.
+- Exclude CSV rows whose status is not `naměřená data OK` so PND placeholders trigger a retry.
+
 ## 0.3.3
 
 - Select the 15-minute PND interval type through the dashboard's Vue multiselect before locating its table.

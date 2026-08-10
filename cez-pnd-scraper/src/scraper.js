@@ -2,7 +2,7 @@ import { access, chmod, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { DateTime } from "luxon";
 import { chromium } from "playwright";
-import { domTableRows, parseDailyRows } from "./parser.js";
+import { parsePndCsv } from "./parser.js";
 
 export class PndScraper {
   constructor(config, logger) {
@@ -43,11 +43,10 @@ export class PndScraper {
       // PND modifies browser globals in a way that breaks Playwright's selector
       // evaluator. Keep all dashboard interaction on native DOM APIs instead of
       // selector-based Playwright calls.
-      await this.selectQuarterHourInterval(page);
-      const tableId = await this.findConsumptionTable(page);
-      await this.selectYesterdayAndSearch(page, tableId, targetDate);
-      const { headers, rows } = await this.readAllPages(page, tableId);
-      return parseDailyRows(headers, rows, {
+      const intervalInputId = await this.findExportWindow(page);
+      await this.selectYesterdayAndSearch(page, intervalInputId, targetDate);
+      const csv = await this.downloadCsv(page, intervalInputId);
+      return parsePndCsv(csv, {
         elm: this.config.elm,
         timezone: this.config.timezone,
         targetDate,
@@ -92,160 +91,75 @@ export class PndScraper {
     ]);
   }
 
-  async findConsumptionTable(page) {
-    const result = await pollForValue(page, async () => page.evaluate(({ elm }) => {
-      const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-      for (const table of document.querySelectorAll('table[id*="table-data"]')) {
-        const headers = [...table.querySelectorAll("thead th")].map((header) => normalize(header.textContent));
-        const matches = headers.some((header) => {
-          const lower = header.toLowerCase();
-          return /\+a(?:\/|\b)/i.test(header)
-            && lower.includes("[kw]")
-            && (!elm || header.includes(`+A/${elm}`));
-        });
-        if (matches && table.id) return table.id;
+  async findExportWindow(page) {
+    const inputId = await pollForValue(page, async () => page.evaluate(() => {
+      for (const window of document.querySelectorAll(".pnd-window")) {
+        const input = window.querySelector('input[id$="-intervalType"]');
+        const search = [...window.querySelectorAll("button")]
+          .find((button) => button.textContent?.trim() === "Vyhledat data");
+        const csv = [...window.querySelectorAll("a")]
+          .find((link) => link.textContent?.trim() === "CSV");
+        if (input?.id && search && csv) return input.id;
       }
       return null;
-    }, { elm: this.config.elm }), 30_000);
-
-    if (!result) throw new Error("No PND table with a matching +A kW column was found");
-    return result;
+    }), 30_000);
+    if (!inputId) throw new Error("No PND data window with CSV export was found");
+    return inputId;
   }
 
-  async selectQuarterHourInterval(page) {
-    const result = await pollForValue(page, async () => page.evaluate(() => {
-      const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-      const isQuarterHour = (value) => /\b15\s*(?:min(?:ut(?:a|y)?)?\.?|m)\b|čtvrt(?:hodin|hod)/i.test(value);
-      const input = document.querySelector('input[id$="-intervalType"]');
-      if (!input) return { status: "not-present" };
-
-      const multiselect = input.closest(".multiselect") ?? input.parentElement;
-      const selected = normalize(multiselect?.querySelector(".multiselect__single")?.textContent);
-      if (isQuarterHour(selected)) return { status: "selected" };
-
-      input.focus();
-      input.click();
-      const options = [...(multiselect?.querySelectorAll(".multiselect__option") ?? [])];
-      const option = options.find((element) => isQuarterHour(normalize(element.textContent)));
-      if (option) {
-        option.click();
-        return { status: "selected" };
-      }
-      if (options.length) return { status: "unmatched", options: options.map((element) => normalize(element.textContent)) };
-      return null;
-    }), 10_000);
-
-    if (!result || result.status === "unmatched") {
-      const options = result?.options?.join(", ") || "none";
-      throw new Error(`PND interval type does not offer a 15-minute option (available: ${options})`);
-    }
-  }
-
-  async selectYesterdayAndSearch(page, tableId, targetDate) {
+  async selectYesterdayAndSearch(page, intervalInputId, targetDate) {
     const controls = await page.evaluate(({ id }) => {
-      const table = document.getElementById(id);
-      if (!table) return { error: "PND consumption table disappeared" };
-      const scope = table.closest(".pnd-window") ?? document.body;
+      const input = document.getElementById(id);
+      if (!input) return { error: "PND data window disappeared" };
+      const scope = input.closest(".pnd-window") ?? document.body;
       const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-      const visible = (element) => {
-        const style = getComputedStyle(element);
-        return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
-      };
-      const leaves = [...scope.querySelectorAll("*")].filter((element) =>
-        visible(element)
-        && normalize(element.textContent) === "Včera"
-        && ![...element.children].some((child) => normalize(child.textContent) === "Včera"),
-      );
-      const text = leaves[0];
-      const periodControl = text?.closest('label, button, [role="radio"], [role="button"]') ?? text;
-      if (!periodControl) return { error: 'The period option "Včera" was not found near the PND table' };
-      periodControl.click();
+      input.click();
+      const yesterday = [...scope.querySelectorAll(".multiselect__option")]
+        .find((option) => normalize(option.textContent) === "Včera");
+      if (!yesterday) return { error: 'The period option "Včera" was not found in the PND interval menu' };
+      yesterday.click();
 
-      const search = [...scope.querySelectorAll('button, [role="button"], input[type="submit"], a')]
-        .find((element) => visible(element) && /VYHLEDAT DATA/i.test(normalize(element.textContent || element.value)));
-      if (!search) return { error: 'The button "VYHLEDAT DATA" was not found near the PND table' };
+      const search = [...scope.querySelectorAll("button")]
+        .find((button) => /VYHLEDAT DATA/i.test(normalize(button.textContent)));
+      if (!search) return { error: 'The button "VYHLEDAT DATA" was not found in the PND data window' };
       search.click();
       return { ok: true };
-    }, { id: tableId });
+    }, { id: intervalInputId });
     if (controls.error) throw new Error(controls.error);
 
     const expectedPrefix = DateTime.fromISO(targetDate).toFormat("dd.MM.yyyy");
-    await page.waitForTimeout(500);
-    const found = await pollForValue(page, async () => page.evaluate(({ id, expected }) => {
-      const table = document.getElementById(id);
-      return [...(table?.querySelectorAll("tbody tr td:first-child") ?? [])]
-        .some((cell) => cell.textContent?.trim().startsWith(expected)) || null;
-    }, { id: tableId, expected: expectedPrefix }), 60_000);
-    if (!found) throw new Error(`PND table did not load the period Včera (${targetDate})`);
+    const selected = await pollForValue(page, async () => page.evaluate(({ id, expected }) => {
+      const input = document.getElementById(id);
+      const scope = input?.closest(".pnd-window");
+      const period = scope?.querySelector('input[id$="-interval"]');
+      return period?.value.startsWith(expected) || null;
+    }, { id: intervalInputId, expected: expectedPrefix }), 10_000);
+    if (!selected) throw new Error(`PND did not select yesterday (${targetDate})`);
+    await page.waitForTimeout(1_000);
   }
 
-  async readAllPages(page, tableId) {
-    const initial = await readPageState(page, tableId);
-    const pagination = parsePaginationInfo(initial.pageInfo);
-    const lastPage = pagination?.lastPage ?? 1;
-    const rows = [];
-
-    for (let pageNumber = 1; pageNumber <= lastPage; pageNumber += 1) {
-      let state = await readPageState(page, tableId);
-      if (state.hasPagination && state.currentPage !== pageNumber) {
-        await switchPage(page, tableId, pageNumber);
-        const expectedStart = (pageNumber - 1) * (pagination?.pageSize ?? 100) + 1;
-        const switched = await pollForValue(page, async () => {
-          const current = await readPageState(page, tableId);
-          return parsePaginationInfo(current.pageInfo)?.start === expectedStart ? current : null;
-        }, 10_000);
-        if (!switched) throw new Error(`PND table did not switch to page ${pageNumber}`);
-        state = switched;
-      }
-      rows.push(...state.rows);
-    }
-    return domTableRows(initial.headers, rows);
+  async downloadCsv(page, intervalInputId) {
+    const download = page.waitForEvent("download", { timeout: 60_000 });
+    const clicked = await page.evaluate(({ id }) => {
+      const input = document.getElementById(id);
+      const scope = input?.closest(".pnd-window");
+      const csv = [...(scope?.querySelectorAll("a") ?? [])]
+        .find((link) => link.textContent?.trim() === "CSV");
+      csv?.click();
+      return Boolean(csv);
+    }, { id: intervalInputId });
+    if (!clicked) throw new Error("PND CSV export option was not found");
+    return readDownload(await download);
   }
 }
 
-async function readPageState(page, tableId) {
-  const state = await page.evaluate(({ id }) => {
-    const table = document.getElementById(id);
-    if (!table) return null;
-    const wrapper = table.closest(".pnd-table") ?? table.parentElement;
-    const pageInput = wrapper?.querySelector("input.pnd-pagination-number");
-    const pageInfo = wrapper?.querySelector(".pnd-pagination-info");
-    return {
-      headers: [...table.querySelectorAll("thead th")].map((cell) => cell.textContent ?? ""),
-      rows: [...table.querySelectorAll("tbody tr")].map((row) =>
-        [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? ""),
-      ),
-      hasPagination: Boolean(pageInput && pageInfo),
-      currentPage: Number(pageInput?.value ?? 1),
-      pageInfo: pageInfo?.textContent ?? "",
-    };
-  }, { id: tableId });
-  if (!state) throw new Error("PND consumption table disappeared");
-  return state;
-}
-
-async function switchPage(page, tableId, pageNumber) {
-  const changed = await page.evaluate(({ id, wanted }) => {
-    const table = document.getElementById(id);
-    const wrapper = table?.closest(".pnd-table") ?? table?.parentElement;
-    const input = wrapper?.querySelector("input.pnd-pagination-number");
-    if (!input) return false;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-    setter?.call(input, String(wanted));
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    for (const type of ["keydown", "keypress", "keyup"]) {
-      input.dispatchEvent(new KeyboardEvent(type, {
-        key: "Enter",
-        code: "Enter",
-        keyCode: 13,
-        which: 13,
-        bubbles: true,
-      }));
-    }
-    return true;
-  }, { id: tableId, wanted: pageNumber });
-  if (!changed) throw new Error("PND pagination input was not found");
+async function readDownload(download) {
+  const stream = await download.createReadStream();
+  if (!stream) throw new Error("PND CSV download has no readable body");
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  // PND declares UTF-8 but exports Czech status text in Windows-1250.
+  return new TextDecoder("windows-1250").decode(Buffer.concat(chunks));
 }
 
 async function pollForValue(page, operation, timeoutMs) {
@@ -265,15 +179,4 @@ async function fileExists(filePath) {
   } catch {
     return false;
   }
-}
-
-export function parsePaginationInfo(value) {
-  const match = String(value).match(/(\d+)\s*-\s*(\d+)\s*z\s*(\d+)/i);
-  if (!match) return null;
-  const start = Number(match[1]);
-  const end = Number(match[2]);
-  const total = Number(match[3]);
-  const pageSize = end - start + 1;
-  if (pageSize < 1 || total < 1) return null;
-  return { start, end, total, pageSize, lastPage: Math.ceil(total / pageSize) };
 }

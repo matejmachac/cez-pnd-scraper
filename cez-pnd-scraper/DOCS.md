@@ -5,9 +5,9 @@ Assistant long-term statistics. It does not create a live power sensor and does
 not use MQTT.
 
 On each attempt the app starts headless Chromium, signs in when necessary,
-selects **Včera** in the dashboard window containing the `+A [kW]` table,
-clicks **VYHLEDAT DATA**, reads every table page, and closes Chromium. The
-lightweight Node.js scheduler remains idle between attempts.
+selects **Včera** in the PND data window, clicks **VYHLEDAT DATA**, downloads
+its CSV export, and closes Chromium. The lightweight Node.js scheduler remains
+idle between attempts.
 
 ## Requirements
 

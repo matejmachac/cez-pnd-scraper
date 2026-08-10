@@ -83,6 +83,15 @@ export function parseDailyRows(headers, rows, {
   };
 }
 
+export function parsePndCsv(csv, options) {
+  const [headers = [], ...rows] = parseCsv(csv);
+  const statusColumn = headers.findIndex((header) => /status/i.test(header));
+  const measuredRows = statusColumn < 0
+    ? rows
+    : rows.filter((cells) => normalizeStatus(cells[statusColumn]).includes("namerena data ok"));
+  return parseDailyRows(headers, measuredRows, options);
+}
+
 export function domTableRows(headers, rows) {
   return {
     headers: headers.map(normalizeText),
@@ -96,4 +105,44 @@ function extractMeterId(header) {
 
 function normalizeText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeStatus(value) {
+  return String(value ?? "").normalize("NFD").replace(/\p{Mark}/gu, "").toLowerCase();
+}
+
+function parseCsv(value) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let quoted = false;
+  const source = String(value ?? "").replace(/^\uFEFF/, "");
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (quoted) {
+      if (char === '"' && source[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ";") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field.replace(/\r$/, ""));
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+  if (field || row.length) rows.push([...row, field.replace(/\r$/, "")]);
+  return rows;
 }
