@@ -34,7 +34,7 @@ Build the same image that HAOS builds:
 
 ```bash
 docker build \
-  --build-arg BUILD_VERSION=0.3.4 \
+  --build-arg BUILD_VERSION=0.3.5 \
   --build-arg BUILD_ARCH=amd64 \
   -t cez-pnd-scraper:dev \
   cez-pnd-scraper

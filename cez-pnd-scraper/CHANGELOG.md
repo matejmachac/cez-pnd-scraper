@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5
+
+- Detect PND redirects to `/login?error` as rejected sign-ins.
+- Delete the saved browser session and retry once in a clean browser context.
+- Report a clear credentials/manual-login error when the clean retry is also rejected.
+
 ## 0.3.4
 
 - Download the daily CSV export instead of reading the dashboard table and its pagination.

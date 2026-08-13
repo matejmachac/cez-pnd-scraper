@@ -1,4 +1,4 @@
-import { access, chmod, mkdir } from "node:fs/promises";
+import { access, chmod, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { DateTime } from "luxon";
 import { chromium } from "playwright";
@@ -19,41 +19,59 @@ export class PndScraper {
       headless: true,
       args: ["--disable-dev-shm-usage", "--no-sandbox"],
     });
-    let page;
-
     try {
-      const contextOptions = {
-        locale: "cs-CZ",
-        timezoneId: this.config.timezone,
-        viewport: { width: 1440, height: 1000 },
-      };
-      if (await fileExists(this.storageStatePath)) contextOptions.storageState = this.storageStatePath;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const contextOptions = {
+          locale: "cs-CZ",
+          timezoneId: this.config.timezone,
+          viewport: { width: 1440, height: 1000 },
+        };
+        if (attempt === 0 && await fileExists(this.storageStatePath)) {
+          contextOptions.storageState = this.storageStatePath;
+        }
 
-      const context = await browser.newContext(contextOptions);
-      page = await context.newPage();
-      await page.goto(this.config.dashboardUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
-      await this.loginIfRequired(page);
-      await page.waitForURL(/\/cezpnd2\/external\/dashboard\/view/, {
-        waitUntil: "domcontentloaded",
-        timeout: 60_000,
-      });
-      await context.storageState({ path: this.storageStatePath });
-      await chmod(this.storageStatePath, 0o600);
+        const context = await browser.newContext(contextOptions);
+        const page = await context.newPage();
+        try {
+          await page.goto(this.config.dashboardUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+          await this.loginIfRequired(page);
+          await page.waitForURL(/\/cezpnd2\/external\/dashboard\/view/, {
+            waitUntil: "domcontentloaded",
+            timeout: 60_000,
+          });
+          await context.storageState({ path: this.storageStatePath });
+          await chmod(this.storageStatePath, 0o600);
 
-      // PND modifies browser globals in a way that breaks Playwright's selector
-      // evaluator. Keep all dashboard interaction on native DOM APIs instead of
-      // selector-based Playwright calls.
-      const intervalInputId = await this.findExportWindow(page);
-      await this.selectYesterdayAndSearch(page, intervalInputId, targetDate);
-      const csv = await this.downloadCsv(page, intervalInputId);
-      return parsePndCsv(csv, {
-        elm: this.config.elm,
-        timezone: this.config.timezone,
-        targetDate,
-      });
-    } catch (error) {
-      if (page) await page.screenshot({ path: this.errorScreenshotPath, fullPage: true }).catch(() => {});
-      throw error;
+          // PND modifies browser globals in a way that breaks Playwright's selector
+          // evaluator. Keep all dashboard interaction on native DOM APIs instead of
+          // selector-based Playwright calls.
+          const intervalInputId = await this.findExportWindow(page);
+          await this.selectYesterdayAndSearch(page, intervalInputId, targetDate);
+          const csv = await this.downloadCsv(page, intervalInputId);
+          return parsePndCsv(csv, {
+            elm: this.config.elm,
+            timezone: this.config.timezone,
+            targetDate,
+          });
+        } catch (error) {
+          await page.screenshot({ path: this.errorScreenshotPath, fullPage: true }).catch(() => {});
+          if (error instanceof PndLoginRejectedError && attempt === 0) {
+            await rm(this.storageStatePath, { force: true });
+            this.logger.warn("PND rejected sign-in; cleared saved session and retrying once");
+            continue;
+          }
+          if (error instanceof PndLoginRejectedError) {
+            throw new Error(
+              "PND rejected sign-in after a clean-session retry; verify the configured credentials or sign in to PND manually",
+              { cause: error },
+            );
+          }
+          throw error;
+        } finally {
+          await context.close();
+        }
+      }
+      throw new Error("PND sign-in retry ended unexpectedly");
     } finally {
       await browser.close();
     }
@@ -70,7 +88,11 @@ export class PndScraper {
 
     this.logger.info("PND session expired; signing in again");
     await Promise.all([
-      page.waitForURL(/\/cezpnd2\/external\/dashboard\/view/, { timeout: 60_000 }),
+      page.waitForURL((url) =>
+        url.pathname === "/cezpnd2/external/dashboard/view" || isPndLoginErrorUrl(url), {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      }),
       page.evaluate(({ email, password }) => {
         document.querySelector("#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowallSelection")?.click();
         const emailInput = document.querySelector('input[placeholder="Zadejte svůj e-mail"], input[type="email"]');
@@ -89,6 +111,7 @@ export class PndScraper {
         }
       }, { email: this.config.email, password: this.config.password }),
     ]);
+    if (isPndLoginErrorUrl(page.url())) throw new PndLoginRejectedError();
   }
 
   async findExportWindow(page) {
@@ -151,6 +174,18 @@ export class PndScraper {
     if (!clicked) throw new Error("PND CSV export option was not found");
     return readDownload(await download);
   }
+}
+
+class PndLoginRejectedError extends Error {
+  constructor() {
+    super("PND rejected sign-in and redirected to /login?error");
+    this.name = "PndLoginRejectedError";
+  }
+}
+
+export function isPndLoginErrorUrl(value) {
+  const url = value instanceof URL ? value : new URL(value);
+  return url.pathname.endsWith("/login") && url.searchParams.has("error");
 }
 
 async function readDownload(download) {
