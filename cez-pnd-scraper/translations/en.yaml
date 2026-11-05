@@ -16,7 +16,10 @@ configuration:
     description: Local minute of the regular import attempt.
   retry_minutes:
     name: Retry interval
-    description: Minutes until another attempt when yesterday's data is still incomplete.
+    description: Minutes until another attempt when any requested day is incomplete or an import fails.
+  backfill_from:
+    name: Backfill from date
+    description: Optional inclusive start date (YYYY-MM-DD) for replaying history through yesterday. Empty automatically catches up days after the last successful import.
   add_to_energy_dashboard:
     name: Add to Energy dashboard
     description: Automatically adds ČEZ PND consumption as grid import after the first import and preserves other sources.

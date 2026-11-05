@@ -62,4 +62,12 @@ test("parses PND CSV and excludes unknown placeholder values", () => {
   );
   assert.equal(profile.intervals.length, 1);
   assert.equal(profile.intervals[0].powerKw, 0.492);
+  assert.deepEqual(profile.diagnostics, {
+    exportedRows: 2,
+    measuredRows: 1,
+    targetDateIntervals: 1,
+    firstTimestamp: "01.08.2026 00:15:00",
+    lastTimestamp: "01.08.2026 00:30:00",
+    statusCounts: { "namerena data ok": 1, "neznama hodnota": 1 },
+  });
 });

@@ -1,14 +1,9 @@
 import path from "node:path";
 import { DateTime } from "luxon";
 import { loadConfig } from "./config.js";
-import { ensureEnergyDashboardSource } from "./energy-dashboard.js";
+import { runImport } from "./backfill.js";
 import { HomeAssistantClient } from "./home-assistant.js";
 import { startHealthServer } from "./health.js";
-import {
-  buildHourlyStatistics,
-  createStatisticMetadata,
-  defaultStatisticId,
-} from "./importer.js";
 import { createLogger } from "./logger.js";
 import { PndScraper } from "./scraper.js";
 import { delay, millisecondsUntilDailyWindow, nextDailyRun } from "./scheduler.js";
@@ -29,6 +24,7 @@ logger.info("ČEZ PND delayed statistics importer started", {
   schedule: `${String(config.importHour).padStart(2, "0")}:${String(config.importMinute).padStart(2, "0")}`,
   retryMinutes: config.retryMinutes,
   elm: config.elm || "auto",
+  backfillFrom: config.backfillFrom || "automatic catch-up",
 });
 
 let retrying = false;
@@ -49,80 +45,20 @@ while (!status.stopping) {
 
   status.running = true;
   try {
-    const now = DateTime.now().setZone(config.timezone);
-    const targetDate = now.minus({ days: 1 }).toISODate();
-    const state = await stateStore.load();
-
-    if (state.lastImportedDate === targetDate) {
-      retrying = false;
-      logger.debug("Yesterday is already imported", { targetDate });
-    } else {
-      const profile = await scraper.scrapeYesterday(now);
-      const statisticId = config.statisticId || defaultStatisticId(profile.meterId);
-      const client = new HomeAssistantClient({
+    await runImport({
+      config,
+      stateStore,
+      scraper,
+      logger,
+      now: DateTime.now().setZone(config.timezone),
+      signal: abortController.signal,
+      createClient: () => new HomeAssistantClient({
         url: config.homeAssistantWebSocketUrl,
         token: config.supervisorToken,
         logger,
-      });
-
-      try {
-        await client.connect();
-        const dayStart = DateTime.fromISO(targetDate, { zone: config.timezone }).startOf("day");
-        const baseSum = await client.getLatestSum(statisticId, dayStart.toUTC().toISO());
-        const batch = buildHourlyStatistics(profile, { timezone: config.timezone, baseSum });
-        await client.importStatistics(
-          createStatisticMetadata(statisticId, `ČEZ PND consumption ${profile.meterId}`),
-          batch.stats,
-        );
-        let energyDashboardConfigured = false;
-        if (config.addToEnergyDashboard) {
-          try {
-            const dashboard = await ensureEnergyDashboardSource(
-              client,
-              statisticId,
-              `ČEZ PND ${profile.meterId}`,
-            );
-            energyDashboardConfigured = true;
-            logger.info(
-              dashboard.changed
-                ? "Added ČEZ PND consumption to the Energy dashboard"
-                : "ČEZ PND consumption is already present in the Energy dashboard",
-              { statisticId },
-            );
-            if (dashboard.validationError) {
-              logger.warn("Energy dashboard was saved but validation could not be run", {
-                error: dashboard.validationError,
-              });
-            }
-          } catch (error) {
-            logger.warn("Statistics were imported, but automatic Energy dashboard setup failed", {
-              error: error.message,
-              statisticId,
-            });
-          }
-        }
-        await stateStore.save({
-          lastImportedDate: targetDate,
-          statisticId,
-          meterId: profile.meterId,
-          cumulativeSum: batch.cumulativeSum,
-          lastImportAt: new Date().toISOString(),
-          lastDayEnergyKwh: batch.energyKwh,
-          energyDashboardConfigured,
-        });
-        logger.info("Imported complete PND day into Home Assistant statistics", {
-          targetDate,
-          statisticId,
-          intervals: batch.intervalCount,
-          hours: batch.hourCount,
-          energyKwh: batch.energyKwh,
-        });
-      } finally {
-        client.close();
-      }
-      retrying = false;
-    }
-
+      }),
+    });
+    retrying = false;
     status.lastSuccess = new Date().toISOString();
     status.lastError = null;
   } catch (error) {

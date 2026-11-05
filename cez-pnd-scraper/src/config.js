@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { parseImportDate } from "./backfill.js";
 
 const DEFAULT_OPTIONS_PATH = "/data/options.json";
 
@@ -17,6 +18,7 @@ export async function loadConfig(optionsPath = process.env.OPTIONS_PATH ?? DEFAU
     importHour: toInteger(process.env.IMPORT_HOUR ?? options.import_hour, 6),
     importMinute: toInteger(process.env.IMPORT_MINUTE ?? options.import_minute, 30),
     retryMinutes: toInteger(process.env.RETRY_MINUTES ?? options.retry_minutes, 60),
+    backfillFrom: String(process.env.BACKFILL_FROM ?? options.backfill_from ?? "").trim(),
     addToEnergyDashboard: toBoolean(
       process.env.ADD_TO_ENERGY_DASHBOARD ?? options.add_to_energy_dashboard,
       true,
@@ -36,6 +38,7 @@ export async function loadConfig(optionsPath = process.env.OPTIONS_PATH ?? DEFAU
 
   if (!config.email) throw new Error("Missing required PND email");
   if (!config.password) throw new Error("Missing required PND password");
+  if (config.backfillFrom) parseImportDate(config.backfillFrom, config.timezone);
   if (config.importHour < 0 || config.importHour > 23) throw new Error("import_hour must be 0-23");
   if (config.importMinute < 0 || config.importMinute > 59) throw new Error("import_minute must be 0-59");
   if (!config.supervisorToken) throw new Error("SUPERVISOR_TOKEN is missing");

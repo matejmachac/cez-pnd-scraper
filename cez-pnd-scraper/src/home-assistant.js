@@ -55,9 +55,17 @@ export class HomeAssistantClient {
       statistic_ids: [statisticId],
       period: "hour",
       types: ["sum"],
+      units: { energy: "kWh" },
     });
     const rows = result?.[statisticId] ?? [];
-    return rows.length > 0 && Number.isFinite(rows.at(-1)?.sum) ? rows.at(-1).sum : 0;
+    // Explicitly exclude the replacement range, even if the API includes its
+    // boundary row. A retry must never use its own first imported hour as base.
+    const previous = rows.map((row) => ({
+      startMs: typeof row.start === "number" ? row.start : Date.parse(row.start),
+      sum: row.sum,
+    })).filter((row) => Number.isFinite(row.startMs) && row.startMs < end.getTime() && Number.isFinite(row.sum))
+      .sort((left, right) => left.startMs - right.startMs);
+    return previous.at(-1)?.sum ?? 0;
   }
 
   command(payload) {

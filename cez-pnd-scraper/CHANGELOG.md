@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.0
+
+- Automatically catch up every day after the last successful import through yesterday.
+- Add `backfill_from` to replay older history and repair gaps before already imported days.
+- Select historical PND date ranges through editable inputs or Flatpickr.
+- Validate the entire range before writing and rebuild cumulative sums chronologically
+  from HA's preceding baseline in one idempotent import.
+- Save completion only after HA accepts the import; retries safely replace existing hours.
+- Include synthetic end-to-end Chromium/PND/HA WebSocket tests for historical selection,
+  DST, cumulative total repair, and restart idempotency.
+- Include the portal recovery and export timing fixes from 0.3.6.
+
+## 0.3.6
+
+- Find the data window even when CSV export is not available until after searching.
+- Wait for the selected period to update before clicking Search, then wait for
+  search requests to finish before exporting instead of sleeping for one second.
+- Retry portal failures (including missing dashboard windows) once with a clean
+  browser session, not just explicit login rejections.
+- Wait for CAS to reveal its login form before deciding whether sign-in is needed.
+- Log CSV row/status counts and exported timestamps when measurements are incomplete.
+- Keep rejecting incomplete days; historical backfill is not included in this release.
+
 ## 0.3.5
 
 - Detect PND redirects to `/login?error` as rejected sign-ins.

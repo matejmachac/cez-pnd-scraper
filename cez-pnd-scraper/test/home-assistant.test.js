@@ -3,6 +3,25 @@ import assert from "node:assert/strict";
 import { WebSocketServer } from "ws";
 import { HomeAssistantClient } from "../src/home-assistant.js";
 
+test("historical baseline excludes boundary/later hours and requests kWh", async () => {
+  const client = new HomeAssistantClient({});
+  let query;
+  client.command = async (payload) => {
+    query = payload;
+    return { "cez_pnd:test": [
+      { start: Date.parse("2026-10-26T23:00:00Z"), sum: 200 },
+      { start: "2026-10-25T21:00:00Z", sum: 99 },
+      { start: Date.parse("2026-10-25T23:00:00Z"), sum: 150 },
+      { start: Date.parse("2026-10-25T22:00:00Z"), sum: 100 },
+    ] };
+  };
+  assert.equal(await client.getLatestSum("cez_pnd:test", "2026-10-25T23:00:00Z"), 100);
+  assert.deepEqual(query.units, { energy: "kWh" });
+  assert.equal(query.end_time, "2026-10-25T23:00:00.000Z");
+  client.command = async () => ({});
+  assert.equal(await client.getLatestSum("cez_pnd:test", "2026-10-25T23:00:00Z"), 0);
+});
+
 test("authenticates and imports statistics through the Home Assistant protocol", async (context) => {
   const server = new WebSocketServer({ port: 0 });
   await new Promise((resolve) => server.once("listening", resolve));

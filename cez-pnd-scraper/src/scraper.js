@@ -3,19 +3,28 @@ import path from "node:path";
 import { DateTime } from "luxon";
 import { chromium } from "playwright";
 import { parsePndCsv } from "./parser.js";
+import { buildHourlyStatistics, IncompleteDayError } from "./importer.js";
 
 export class PndScraper {
-  constructor(config, logger) {
+  constructor(config, logger, browserType = chromium) {
     this.config = config;
     this.logger = logger;
+    this.browserType = browserType;
     this.storageStatePath = path.join(config.dataDir, "browser-state.json");
     this.errorScreenshotPath = path.join(config.dataDir, "last-error.png");
   }
 
   async scrapeYesterday(now = DateTime.now().setZone(this.config.timezone)) {
-    const targetDate = now.minus({ days: 1 }).toISODate();
+    return this.scrapeDate(now.minus({ days: 1 }).toISODate(), now);
+  }
+
+  async scrapeDate(targetDate, now = DateTime.now().setZone(this.config.timezone)) {
+    const date = DateTime.fromISO(targetDate, { zone: this.config.timezone });
+    if (!date.isValid || date.toISODate() !== targetDate || targetDate >= now.setZone(this.config.timezone).toISODate()) {
+      throw new Error(`PND import date must be a completed calendar day: ${targetDate}`);
+    }
     await mkdir(this.config.dataDir, { recursive: true });
-    const browser = await chromium.launch({
+    const browser = await this.browserType.launch({
       headless: true,
       args: ["--disable-dev-shm-usage", "--no-sandbox"],
     });
@@ -39,25 +48,45 @@ export class PndScraper {
             waitUntil: "domcontentloaded",
             timeout: 60_000,
           });
-          await context.storageState({ path: this.storageStatePath });
-          await chmod(this.storageStatePath, 0o600);
-
           // PND modifies browser globals in a way that breaks Playwright's selector
           // evaluator. Keep all dashboard interaction on native DOM APIs instead of
           // selector-based Playwright calls.
           const intervalInputId = await this.findExportWindow(page);
-          await this.selectYesterdayAndSearch(page, intervalInputId, targetDate);
+          if (targetDate === now.setZone(this.config.timezone).minus({ days: 1 }).toISODate()) {
+            await this.selectYesterdayAndSearch(page, intervalInputId, targetDate);
+          } else {
+            await this.selectHistoricalAndSearch(page, intervalInputId, targetDate);
+          }
           const csv = await this.downloadCsv(page, intervalInputId);
-          return parsePndCsv(csv, {
+          const profile = parsePndCsv(csv, {
             elm: this.config.elm,
             timezone: this.config.timezone,
             targetDate,
           });
+          // Validate before saving the session or handing data to Home Assistant.
+          try {
+            buildHourlyStatistics(profile, { timezone: this.config.timezone });
+          } catch (error) {
+            if (error instanceof IncompleteDayError) {
+              this.logger.warn("PND CSV does not contain a complete measured day", {
+                targetDate,
+                ...profile.diagnostics,
+              });
+            }
+            throw error;
+          }
+          await context.storageState({ path: this.storageStatePath });
+          await chmod(this.storageStatePath, 0o600);
+          return profile;
         } catch (error) {
           await page.screenshot({ path: this.errorScreenshotPath, fullPage: true }).catch(() => {});
-          if (error instanceof PndLoginRejectedError && attempt === 0) {
+          // A stale session can still reach the dashboard URL but fail to load
+          // its windows. Recover from that too, not just /login?error.
+          if (!(error instanceof IncompleteDayError) && attempt === 0) {
             await rm(this.storageStatePath, { force: true });
-            this.logger.warn("PND rejected sign-in; cleared saved session and retrying once");
+            this.logger.warn("PND portal attempt failed; cleared saved session and retrying once", {
+              error: error.message,
+            });
             continue;
           }
           if (error instanceof PndLoginRejectedError) {
@@ -71,20 +100,28 @@ export class PndScraper {
           await context.close();
         }
       }
-      throw new Error("PND sign-in retry ended unexpectedly");
+      throw new Error("PND portal retry ended unexpectedly");
     } finally {
       await browser.close();
     }
   }
 
   async loginIfRequired(page) {
-    const loginVisible = await page.evaluate(() => {
+    const ready = await pollForValue(page, async () => page.evaluate(() => {
       const input = document.querySelector('input[placeholder="Zadejte svůj e-mail"], input[type="email"]');
-      if (!input) return false;
-      const style = getComputedStyle(input);
-      return style.display !== "none" && style.visibility !== "hidden" && input.getClientRects().length > 0;
-    });
-    if (!loginVisible) return;
+      if (input) {
+        const style = getComputedStyle(input);
+        if (style.display !== "none" && style.visibility !== "hidden" && input.getClientRects().length > 0) {
+          return "login";
+        }
+      }
+      if (location.pathname === "/cezpnd2/external/dashboard/view") return "dashboard";
+      if (location.pathname.endsWith("/login") && new URLSearchParams(location.search).has("error")) return "rejected";
+      return null;
+    }), 60_000);
+    if (ready === "rejected") throw new PndLoginRejectedError();
+    if (!ready) throw new Error("PND did not display a login form or dashboard");
+    if (ready === "dashboard") return;
 
     this.logger.info("PND session expired; signing in again");
     await Promise.all([
@@ -119,14 +156,12 @@ export class PndScraper {
       for (const window of document.querySelectorAll(".pnd-window")) {
         const input = window.querySelector('input[id$="-intervalType"]');
         const search = [...window.querySelectorAll("button")]
-          .find((button) => button.textContent?.trim() === "Vyhledat data");
-        const csv = [...window.querySelectorAll("a")]
-          .find((link) => link.textContent?.trim() === "CSV");
-        if (input?.id && search && csv) return input.id;
+          .find((button) => /\bvyhledat\s+data\b/i.test(button.textContent ?? ""));
+        if (input?.id && search) return input.id;
       }
       return null;
     }), 30_000);
-    if (!inputId) throw new Error("No PND data window with CSV export was found");
+    if (!inputId) throw new Error("No PND data window with period and search controls was found");
     return inputId;
   }
 
@@ -141,11 +176,6 @@ export class PndScraper {
         .find((option) => normalize(option.textContent) === "Včera");
       if (!yesterday) return { error: 'The period option "Včera" was not found in the PND interval menu' };
       yesterday.click();
-
-      const search = [...scope.querySelectorAll("button")]
-        .find((button) => /VYHLEDAT DATA/i.test(normalize(button.textContent)));
-      if (!search) return { error: 'The button "VYHLEDAT DATA" was not found in the PND data window' };
-      search.click();
       return { ok: true };
     }, { id: intervalInputId });
     if (controls.error) throw new Error(controls.error);
@@ -158,21 +188,92 @@ export class PndScraper {
       return period?.value.startsWith(expected) || null;
     }, { id: intervalInputId, expected: expectedPrefix }), 10_000);
     if (!selected) throw new Error(`PND did not select yesterday (${targetDate})`);
-    await page.waitForTimeout(1_000);
+
+    await this.searchAndWait(page, intervalInputId);
+  }
+
+  async selectHistoricalAndSearch(page, intervalInputId, targetDate) {
+    const expected = DateTime.fromISO(targetDate).toFormat("dd.MM.yyyy");
+    await page.evaluate(({ id }) => {
+      const scope = document.getElementById(id)?.closest(".pnd-window");
+      if (!scope) throw new Error("PND data window disappeared");
+      document.getElementById(id).click();
+      const custom = [...scope.querySelectorAll(".multiselect__option")].find((option) => {
+        const text = (option.textContent ?? "").normalize("NFD").replace(/\p{Mark}/gu, "")
+          .replace(/\s+/g, " ").trim().toLowerCase();
+        return /^(vlastni(?: (?:obdobi|interval|rozsah|vyber))?|volitelne obdobi)$/.test(text);
+      });
+      custom?.click();
+    }, { id: intervalInputId });
+    // Let the period selection render its date-range input before changing it.
+    await page.evaluate(({ id, date, iso }) => {
+      const scope = document.getElementById(id)?.closest(".pnd-window");
+      const input = scope?.querySelector('input[id$="-interval"]');
+      if (!input) throw new Error("PND historical date-range input was not found");
+      if (input._flatpickr) {
+        const [year, month, day] = iso.split("-").map(Number);
+        const local = new Date(year, month - 1, day);
+        input._flatpickr.setDate([local, local], true);
+        input._flatpickr.close();
+      } else {
+        if (input.readOnly || input.disabled) {
+          throw new Error("PND historical date picker is unsupported: no editable range or Flatpickr instance");
+        }
+        const separator = input.value.match(/\d{2}\.\d{2}\.\d{4}(\s*[^\d\s.]+\s*)\d{2}\.\d{2}\.\d{4}/)?.[1] ?? " - ";
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        input.focus();
+        setter.call(input, `${date}${separator}${date}`);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", {
+          key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true,
+        }));
+        input.blur();
+      }
+    }, { id: intervalInputId, date: expected, iso: targetDate });
+    const selected = await pollForValue(page, async () => page.evaluate(({ id, date }) => {
+      const scope = document.getElementById(id)?.closest(".pnd-window");
+      const value = scope?.querySelector('input[id$="-interval"]')?.value ?? "";
+      const dates = value.match(/\d{2}\.\d{2}\.\d{4}/g) ?? [];
+      return dates.length === 2 && dates.every((item) => item === date);
+    }, { id: intervalInputId, date: expected }), 10_000);
+    if (!selected) throw new Error(`PND did not select historical day (${targetDate})`);
+    await this.searchAndWait(page, intervalInputId);
+  }
+
+  async searchAndWait(page, intervalInputId) {
+    // Vue must commit the selected dates before the search handler reads them.
+    // Track the resulting requests rather than exporting an old table after a
+    // fixed sleep; the portal can take much longer than a second to load data.
+    await waitForSearch(page, () => page.evaluate(({ id }) => {
+      const scope = document.getElementById(id)?.closest(".pnd-window");
+      const search = [...(scope?.querySelectorAll("button") ?? [])]
+        .find((button) => /\bvyhledat\s+data\b/i.test(button.textContent ?? ""));
+      if (!search || search.disabled) throw new Error("PND data search is unavailable");
+      search.click();
+    }, { id: intervalInputId }));
+
+    const exportReady = await pollForValue(page, async () => page.evaluate(({ id }) => {
+      const scope = document.getElementById(id)?.closest(".pnd-window");
+      return [...(scope?.querySelectorAll("a") ?? [])]
+        .some((link) => link.textContent?.trim() === "CSV") || null;
+    }, { id: intervalInputId }), 30_000);
+    if (!exportReady) throw new Error("PND search completed without a CSV export option");
   }
 
   async downloadCsv(page, intervalInputId) {
-    const download = page.waitForEvent("download", { timeout: 60_000 });
-    const clicked = await page.evaluate(({ id }) => {
-      const input = document.getElementById(id);
-      const scope = input?.closest(".pnd-window");
-      const csv = [...(scope?.querySelectorAll("a") ?? [])]
-        .find((link) => link.textContent?.trim() === "CSV");
-      csv?.click();
-      return Boolean(csv);
-    }, { id: intervalInputId });
-    if (!clicked) throw new Error("PND CSV export option was not found");
-    return readDownload(await download);
+    const [download] = await Promise.all([
+      page.waitForEvent("download", { timeout: 60_000 }),
+      page.evaluate(({ id }) => {
+        const input = document.getElementById(id);
+        const scope = input?.closest(".pnd-window");
+        const csv = [...(scope?.querySelectorAll("a") ?? [])]
+          .find((link) => link.textContent?.trim() === "CSV");
+        if (!csv) throw new Error("PND CSV export option was not found");
+        csv.click();
+      }, { id: intervalInputId }),
+    ]);
+    return readDownload(download);
   }
 }
 
@@ -186,6 +287,49 @@ class PndLoginRejectedError extends Error {
 export function isPndLoginErrorUrl(value) {
   const url = value instanceof URL ? value : new URL(value);
   return url.pathname.endsWith("/login") && url.searchParams.has("error");
+}
+
+export async function waitForSearch(page, search, { timeoutMs = 60_000, quietMs = 1_000 } = {}) {
+  const pending = new Set();
+  let lastActivity = Date.now();
+  let failure = null;
+  const started = (request) => {
+    if (!["xhr", "fetch"].includes(request.resourceType())) return;
+    pending.add(request);
+    lastActivity = Date.now();
+  };
+  const finished = (request) => {
+    if (!pending.delete(request)) return;
+    lastActivity = Date.now();
+  };
+  const failed = (request) => {
+    if (pending.has(request)) failure = new Error("PND data search request failed");
+    finished(request);
+  };
+  const response = (result) => {
+    if (pending.has(result.request()) && result.status() >= 400) {
+      failure = new Error(`PND data search returned HTTP ${result.status()}`);
+    }
+  };
+  page.on("request", started);
+  page.on("requestfinished", finished);
+  page.on("requestfailed", failed);
+  page.on("response", response);
+  try {
+    await search();
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (failure) throw failure;
+      if (pending.size === 0 && Date.now() - lastActivity >= quietMs) return;
+      await page.waitForTimeout(100);
+    }
+    throw new Error("PND data search did not finish before the timeout");
+  } finally {
+    page.off("request", started);
+    page.off("requestfinished", finished);
+    page.off("requestfailed", failed);
+    page.off("response", response);
+  }
 }
 
 async function readDownload(download) {

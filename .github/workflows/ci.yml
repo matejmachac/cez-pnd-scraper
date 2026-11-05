@@ -22,6 +22,8 @@ jobs:
           cache-dependency-path: cez-pnd-scraper/package-lock.json
       - run: npm ci
       - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
       - run: npm run check
       - run: npm audit --omit=dev
 
@@ -36,5 +38,5 @@ jobs:
           push: false
           platforms: linux/amd64
           build-args: |
-            BUILD_VERSION=0.3.5
+            BUILD_VERSION=0.4.0
             BUILD_ARCH=amd64

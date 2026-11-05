@@ -89,7 +89,22 @@ export function parsePndCsv(csv, options) {
   const measuredRows = statusColumn < 0
     ? rows
     : rows.filter((cells) => normalizeStatus(cells[statusColumn]).includes("namerena data ok"));
-  return parseDailyRows(headers, measuredRows, options);
+  const profile = parseDailyRows(headers, measuredRows, options);
+  const statusCounts = new Map();
+  for (const cells of rows) {
+    const status = normalizeStatus(cells[statusColumn]) || "(no status)";
+    statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
+  }
+  const dateColumn = headers.findIndex((header) => /datum|date/i.test(header));
+  profile.diagnostics = {
+    exportedRows: rows.length,
+    measuredRows: measuredRows.length,
+    targetDateIntervals: profile.intervals.length,
+    firstTimestamp: rows[0]?.[dateColumn] ?? null,
+    lastTimestamp: rows.at(-1)?.[dateColumn] ?? null,
+    statusCounts: Object.fromEntries(statusCounts),
+  };
+  return profile;
 }
 
 export function domTableRows(headers, rows) {

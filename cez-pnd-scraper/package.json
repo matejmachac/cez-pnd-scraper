@@ -1,6 +1,6 @@
 {
   "name": "cez-pnd-scraper",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "ČEZ PND delayed statistics importer for Home Assistant OS",
@@ -9,8 +9,9 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test",
-    "check": "node --check src/index.js && node --check src/scraper.js && node --check src/home-assistant.js"
+    "test": "node --test test/*.test.js",
+    "test:browser": "PND_BROWSER_TESTS=1 node --test test/*-browser.test.js",
+    "check": "node --check src/index.js && node --check src/scraper.js && node --check src/home-assistant.js && node --check src/backfill.js && node --check src/config.js"
   },
   "dependencies": {
     "luxon": "3.7.2",
