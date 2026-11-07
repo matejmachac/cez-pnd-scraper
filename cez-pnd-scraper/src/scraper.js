@@ -189,11 +189,17 @@ export class PndScraper {
     }, { id: intervalInputId, expected: expectedPrefix }), 10_000);
     if (!selected) throw new Error(`PND did not select yesterday (${targetDate})`);
 
-    await this.searchAndWait(page, intervalInputId);
+    await this.searchAndWait(page, intervalInputId, targetDate);
   }
 
   async selectHistoricalAndSearch(page, intervalInputId, targetDate) {
-    const expected = DateTime.fromISO(targetDate).toFormat("dd.MM.yyyy");
+    const dayStart = DateTime.fromISO(targetDate, { zone: this.config.timezone });
+    // PND searches timestamp boundaries, not inclusive date labels. Identical
+    // midnight endpoints yield a header-only CSV. Use a calendar day (not 24
+    // elapsed hours) so DST days include all 92/100 quarter-hour intervals.
+    const dayEnd = dayStart.plus({ days: 1 });
+    const expected = dayStart.toFormat("dd.MM.yyyy");
+    const expectedEnd = dayEnd.toFormat("dd.MM.yyyy");
     await page.evaluate(({ id }) => {
       const scope = document.getElementById(id)?.closest(".pnd-window");
       if (!scope) throw new Error("PND data window disappeared");
@@ -206,23 +212,27 @@ export class PndScraper {
       custom?.click();
     }, { id: intervalInputId });
     // Let the period selection render its date-range input before changing it.
-    await page.evaluate(({ id, date, iso }) => {
+    await page.evaluate(({ id, date, endDate, iso, endIso }) => {
       const scope = document.getElementById(id)?.closest(".pnd-window");
       const input = scope?.querySelector('input[id$="-interval"]');
       if (!input) throw new Error("PND historical date-range input was not found");
       if (input._flatpickr) {
-        const [year, month, day] = iso.split("-").map(Number);
-        const local = new Date(year, month - 1, day);
-        input._flatpickr.setDate([local, local], true);
+        const localDate = (value) => {
+          const [year, month, day] = value.split("-").map(Number);
+          return new Date(year, month - 1, day);
+        };
+        input._flatpickr.setDate([localDate(iso), localDate(endIso)], true);
         input._flatpickr.close();
       } else {
         if (input.readOnly || input.disabled) {
           throw new Error("PND historical date picker is unsupported: no editable range or Flatpickr instance");
         }
-        const separator = input.value.match(/\d{2}\.\d{2}\.\d{4}(\s*[^\d\s.]+\s*)\d{2}\.\d{2}\.\d{4}/)?.[1] ?? " - ";
+        const separator = input.value.match(/\d{2}\.\d{2}\.\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?(\s*[^\d\s.]+\s*)\d{2}\.\d{2}\.\d{4}/)?.[1] ?? " - ";
+        const time = /\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}:\d{2}/.test(input.value) ? " 00:00:00"
+          : /\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}/.test(input.value) ? " 00:00" : "";
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
         input.focus();
-        setter.call(input, `${date}${separator}${date}`);
+        setter.call(input, `${date}${time}${separator}${endDate}${time}`);
         input.dispatchEvent(new Event("input", { bubbles: true }));
         input.dispatchEvent(new Event("change", { bubbles: true }));
         input.dispatchEvent(new KeyboardEvent("keydown", {
@@ -230,18 +240,23 @@ export class PndScraper {
         }));
         input.blur();
       }
-    }, { id: intervalInputId, date: expected, iso: targetDate });
-    const selected = await pollForValue(page, async () => page.evaluate(({ id, date }) => {
+    }, { id: intervalInputId, date: expected, endDate: expectedEnd, iso: targetDate, endIso: dayEnd.toISODate() });
+    const selected = await pollForValue(page, async () => page.evaluate(({ id, date, endDate }) => {
       const scope = document.getElementById(id)?.closest(".pnd-window");
       const value = scope?.querySelector('input[id$="-interval"]')?.value ?? "";
       const dates = value.match(/\d{2}\.\d{2}\.\d{4}/g) ?? [];
-      return dates.length === 2 && dates.every((item) => item === date);
-    }, { id: intervalInputId, date: expected }), 10_000);
+      return dates.length === 2 && dates[0] === date && dates[1] === endDate;
+    }, { id: intervalInputId, date: expected, endDate: expectedEnd }), 10_000);
     if (!selected) throw new Error(`PND did not select historical day (${targetDate})`);
-    await this.searchAndWait(page, intervalInputId);
+    await this.searchAndWait(page, intervalInputId, targetDate);
   }
 
-  async searchAndWait(page, intervalInputId) {
+  async searchAndWait(page, intervalInputId, targetDate) {
+    const selectedPeriod = await page.evaluate(({ id }) => {
+      const scope = document.getElementById(id)?.closest(".pnd-window");
+      return scope?.querySelector('input[id$="-interval"]')?.value ?? null;
+    }, { id: intervalInputId });
+    this.logger.info("Searching PND data window", { targetDate, selectedPeriod });
     // Vue must commit the selected dates before the search handler reads them.
     // Track the resulting requests rather than exporting an old table after a
     // fixed sleep; the portal can take much longer than a second to load data.

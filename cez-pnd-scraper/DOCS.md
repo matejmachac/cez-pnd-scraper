@@ -80,7 +80,11 @@ can clear it after success. To deliberately replay the same date again, clear
 it, restart and let one attempt run, then set the date and restart again.
 
 Historical selection supports editable date-range fields and Flatpickr-backed
-fields. An unsupported read-only picker fails explicitly rather than importing
+fields. Since 0.4.1, the requested range runs from the target day's midnight to
+the following local midnight, including 23/25-hour DST days; identical midnight
+boundaries do not represent a full day. Logs show `Searching PND data window`
+with the actual selected period before each search.
+An unsupported read-only picker fails explicitly rather than importing
 the wrong day. Portal compatibility is covered by synthetic browser tests, not
 live-account verification.
 

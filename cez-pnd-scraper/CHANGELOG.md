@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1
+
+- Fix zero-length historical ranges: request the target midnight through the
+  following local midnight instead of using the same start and end date.
+- Preserve time-bearing editable range formats and handle 23/25-hour DST days.
+- Log the selected portal period before searching to diagnose empty exports.
+- Correct the synthetic portal fixture to return empty CSV for zero-length
+  timestamp ranges, and add DST/year-boundary regression coverage.
+
 ## 0.4.0
 
 - Automatically catch up every day after the last successful import through yesterday.

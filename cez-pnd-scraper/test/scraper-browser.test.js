@@ -6,6 +6,46 @@ import { PndScraper } from "../src/scraper.js";
 // Optional real-browser regressions: npm run test:browser
 const browserTest = (name, fn) => test(name, { skip: process.env.PND_BROWSER_TESTS !== "1" }, fn);
 
+browserTest("historical ranges end at the following local midnight, including DST and year boundaries", async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ timezoneId: "Europe/Prague" });
+  const scraper = new PndScraper({ dataDir: ".", timezone: "Europe/Prague" }, {});
+  scraper.searchAndWait = async () => {};
+  for (const [targetDate, start, end, hours] of [
+    ["2026-10-26", "26.10.2026", "27.10.2026", 24],
+    ["2026-10-25", "25.10.2026", "26.10.2026", 25],
+    ["2026-03-29", "29.03.2026", "30.03.2026", 23],
+    ["2026-12-31", "31.12.2026", "01.01.2027", 24],
+  ]) {
+    for (const time of ["", " 00:00", " 00:00:00"]) {
+      await page.setContent(`<div class="pnd-window">
+        <input id="meter-intervalType">
+        <input id="meter-interval" value="04.11.2026${time} ~ 05.11.2026${time}">
+      </div>`);
+      await scraper.selectHistoricalAndSearch(page, "meter-intervalType", targetDate);
+      assert.equal(await page.evaluate(() => document.getElementById("meter-interval").value),
+        `${start}${time} ~ ${end}${time}`);
+    }
+    await page.setContent(`<div class="pnd-window">
+      <input id="meter-intervalType"><input id="meter-interval" readonly>
+      </div><script>
+        document.getElementById('meter-interval')._flatpickr = {
+          setDate(dates) {
+            window.durationHours = (dates[1] - dates[0]) / 3600000;
+            document.getElementById('meter-interval').value = dates.map(d =>
+              [String(d.getDate()).padStart(2, '0'), String(d.getMonth()+1).padStart(2, '0'), d.getFullYear()].join('.')
+            ).join(' - ');
+          },
+          close() {}
+        };
+      </script>`);
+    await scraper.selectHistoricalAndSearch(page, "meter-intervalType", targetDate);
+    assert.equal(await page.evaluate(() => document.getElementById("meter-interval").value), `${start} - ${end}`);
+    assert.equal(await page.evaluate(() => window.durationHours), hours);
+  }
+});
+
 browserTest("unsupported read-only historical pickers fail without searching the wrong day", async (t) => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());

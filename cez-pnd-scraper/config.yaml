@@ -1,5 +1,5 @@
 name: "ČEZ PND Scraper"
-version: "0.4.0"
+version: "0.4.1"
 slug: "cez_pnd_scraper"
 description: "Imports delayed ČEZ PND consumption into Home Assistant long-term statistics."
 arch:

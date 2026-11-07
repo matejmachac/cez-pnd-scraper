@@ -25,13 +25,20 @@ for (const picker of ["editable", "flatpickr"]) {
         const from = url.searchParams.get("from");
         const to = url.searchParams.get("to");
         searched.push({ from, to });
-        if (from !== to || !/^\d{2}\.\d{2}\.\d{4}$/.test(from)) {
+        const start = DateTime.fromFormat(from ?? "", "dd.MM.yyyy", { zone: "Europe/Prague" });
+        const end = DateTime.fromFormat(to ?? "", "dd.MM.yyyy", { zone: "Europe/Prague" });
+        if (!start.isValid || !end.isValid || end < start) {
           response.writeHead(400).end();
           return;
         }
-        const date = DateTime.fromFormat(from, "dd.MM.yyyy").toISODate();
+        // A timestamp range with identical boundaries contains no intervals.
+        // Do not silently expand it into a full day, as the old fixture did.
+        const rows = [syntheticCsv(start.toISODate()).split("\n")[0]];
+        for (let day = start; day < end; day = day.plus({ days: 1 })) {
+          rows.push(...syntheticCsv(day.toISODate()).split("\n").slice(1));
+        }
         response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-        response.end(syntheticCsv(date));
+        response.end(rows.join("\n"));
         return;
       }
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -40,14 +47,14 @@ for (const picker of ["editable", "flatpickr"]) {
           <input id="meter-intervalType">
           <div class="multiselect__option" id="yesterday">Včera</div>
           <div class="multiselect__option" id="custom">Vlastní období</div>
-          <input id="meter-interval" readonly value="26.10.2026 - 26.10.2026">
+          <input id="meter-interval" readonly value="26.10.2026 - 27.10.2026">
           <button>Vyhledat data</button>
         </div>
         <script>
           const input = document.getElementById('meter-interval');
-          let range = ['26.10.2026', '26.10.2026'];
+          let range = ['26.10.2026', '27.10.2026'];
           document.getElementById('yesterday').onclick = () => queueMicrotask(() => {
-            range = ['26.10.2026', '26.10.2026'];
+            range = ['26.10.2026', '27.10.2026'];
             input.value = range.join(' - ');
           });
           document.getElementById('custom').onclick = () => queueMicrotask(() => {
@@ -76,6 +83,9 @@ for (const picker of ["editable", "flatpickr"]) {
     });
     await new Promise((resolve) => portal.listen(0, "127.0.0.1", resolve));
     t.after(() => new Promise((resolve) => portal.close(resolve)));
+    const empty = await fetch(`http://127.0.0.1:${portal.address().port}/data?from=26.10.2026&to=26.10.2026`);
+    assert.equal((await empty.text()).split("\n").length, 1, "zero-length ranges produce header-only CSV");
+    searched.length = 0;
     const ha = new WebSocketServer({ port: 0 });
     await new Promise((resolve) => ha.once("listening", resolve));
     t.after(() => new Promise((resolve) => ha.close(resolve)));
@@ -121,7 +131,11 @@ for (const picker of ["editable", "flatpickr"]) {
     assert.equal(result.days, 3);
     assert.equal(result.hours, 73);
     assert.equal(result.cumulativeSum, 173);
-    assert.deepEqual(searched, ["24.10.2026", "25.10.2026", "26.10.2026"].map((date) => ({ from: date, to: date })));
+    assert.deepEqual(searched, [
+      { from: "24.10.2026", to: "25.10.2026" },
+      { from: "25.10.2026", to: "26.10.2026" },
+      { from: "26.10.2026", to: "27.10.2026" },
+    ]);
     assert.equal(rows.size, 74);
     assert.equal(rows.get("2026-10-26T22:00:00.000Z").sum, 173);
     assert.deepEqual(rows.get(baseline.start), baseline);
