@@ -1,0 +1,99 @@
+{
+  "title": "ČEZ PND",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect ČEZ PND",
+        "description": "The existing PND app must use native mode. Your PND sign-in stays in that app.",
+        "data": {
+          "url": "PND app address",
+          "token": "PND app access token",
+          "supply_point": "Permanent supply point identifier",
+          "statistic_id": "Existing total consumption statistic (optional)",
+          "history_start": "History start (YYYY-MM-DD)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect ČEZ PND",
+        "description": "If ČEZ rejected sign-in, update the credentials in the PND app first. You can update the connection token here.",
+        "data": {
+          "url": "PND app address",
+          "token": "Access token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "The PND app is unavailable or its legacy importer is still active.",
+      "invalid_auth": "The PND app or ČEZ rejected authentication.",
+      "invalid_configuration": "Check the statistic identifier and history date."
+    },
+    "abort": {
+      "already_configured": "This supply point is already configured.",
+      "reauth_successful": "Connection restored."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "History and electricity prices",
+        "description": "Prices include VAT. Enable Save price change to add a price period. To update past costs, then run Recalculate historical costs. The end date is exclusive.",
+        "data": {
+          "history_start": "History start",
+          "correction_days": "Recent days to check for corrections",
+          "update_price": "Save price change",
+          "price_from": "Valid from (inclusive)",
+          "price_until": "Valid until (exclusive)",
+          "price_vt": "High tariff price (CZK/kWh)",
+          "price_nt": "Low tariff price (CZK/kWh)",
+          "price_fixed": "Fixed charges (CZK/month)",
+          "replace_source": "Replace an existing source for this supply point (none = keep all)"
+        }
+      }
+    },
+    "error": {
+      "invalid_configuration": "Check the dates and prices."
+    }
+  },
+  "issues": {
+    "authentication": {
+      "title": "ČEZ PND – Sign-in needs attention",
+      "description": "Check the credentials in the PND app and the integration connection token. Detail: {detail}."
+    },
+    "synchronization": {
+      "title": "ČEZ PND – Synchronization is retrying",
+      "description": "PND is unavailable or its export format changed. The integration retries automatically with increasing delay. Detail: {detail}."
+    },
+    "missing_measurements": {
+      "title": "ČEZ PND – Incomplete measured history",
+      "description": "Some days have incomplete measurements. Missing values are never filled with zero. These days will be checked again. Days: {detail}."
+    },
+    "tariff_data": {
+      "title": "ČEZ PND – Unverified tariff readings",
+      "description": "Daily tariff readings are missing or disagree with the consumption profile. No hourly tariff split is estimated. Days: {detail}."
+    },
+    "price_data": {
+      "title": "ČEZ PND – Historical prices are missing",
+      "description": "Part of the history has no confirmed price period. Add the applicable prices in the integration settings and recalculate historical costs. Days: {detail}.",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Review ČEZ PND settings",
+            "description": "Continue to the integration settings. Replace an existing energy source only if it measures the same supply point. After changing historical prices, run Recalculate historical costs."
+          }
+        }
+      }
+    },
+    "energy_configuration": {
+      "title": "ČEZ PND – Energy configuration needs attention",
+      "description": "Automatic Energy setup stopped because of a source conflict or validation error. Existing unrelated sources are preserved. Detail: {detail}.",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Review ČEZ PND settings",
+            "description": "Continue to the integration settings. Replace an existing energy source only if it measures the same supply point. After changing historical prices, run Recalculate historical costs."
+          }
+        }
+      }
+    }
+  }
+}

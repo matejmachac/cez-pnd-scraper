@@ -116,10 +116,45 @@ opravy, přerušený checkpoint/restart, výpadek/auth/reauth, chybějící den,
 DST, reset/výměnu měřiče, nulovou spotřebu s fixním poplatkem, změnu ceníku,
 upgrade/reload, konflikty cizích zdrojů, rollback a odinstalaci bez ztráty dat.
 
-Nasazení 0.5.1 a Core restart jsou ověřené. Konečný rozsah skutečně dostupné
-historie, měsíční součty a zobrazení nákladů se doplňují po dokončení běžícího
-produkčního backfillu; referenční faktura 2025/2026 se bez příslušných původních
-měření nesmí považovat za nezávisle rekonstruovanou.
+Nasazení 0.5.1 je ověřené. Produkční backfill dokončil průzkum všech 1096 dní
+9. 11. 2023–8. 11. 2026 a zapsal **97 úplných dnů / 1370,54325 kWh**.
+Pro 965 dní do konce června 2026 portál výslovně nemá datové zdroje.
+Červenec má 30 neúplných/nenaměřených dnů před prvním úplným profilem
+**31. 7. 2026**. Uvnitř dostupné historie chybí úplné měření pro
+**4., 18. a 20. 8. a 8. 9.**; integrace je automaticky znovu kontroluje.
+
+| Období | Úplné dny | Profil kWh | VT kWh | NT kWh | Náklady včetně fixní části |
+|---|---:|---:|---:|---:|---:|
+| 31. 7. | 1 | 25,71525 | nezjištěno | nezjištěno | nepotvrzený ceník |
+| Srpen | 28 | 411,80950 | 65,243 | 346,570 | nepotvrzený ceník |
+| Září | 29 | 291,76450 | 42,098 | 249,667 | nepotvrzený ceník |
+| Říjen | 31 | 423,10750 | 68,688 | 354,421 | 2343,40908466 Kč |
+| 1.–8. listopadu | 8 | 218,14650 | 18,869 | 199,280 | 985,860429893 Kč |
+
+VT/NT byly naměřeny pro všech 96 spárovaných dnů; součet 1344,836 kWh se od
+jejich profilu 1344,828 kWh liší o 0,008 kWh kvůli dennímu zaokrouhlení registrů.
+Pro 31. 7. chybí počáteční registr z 30. 7.; jeho 25,71525 kWh proto není
+předstíráno jako známý tarif. Chybějící dny v tabulce nejsou dopočítané nuly.
+Zářijový součet má jeden chybějící den, a proto není potvrzeným úplným měsícem.
+
+Počáteční registry 30. 9. jsou VT **283,882**, NT **1363,002**, celkem
+1646,885 kWh; odpovídají zaokrouhleným vstupům uživatele. Referenční fakturu
+2025/2026 v rozsahu 11 556 kWh nelze rekonstruovat bez starších měření,
+která tento účet PND neposkytl. Aktuální den se nepovažuje za dokončený.
+
+Nativní Energy bylo vizuálně ověřeno: 8. 11. **51,35 kWh / 207,82 Kč**,
+říjen **423,11 kWh / 2343,41 Kč**, listopad **218,15 kWh / 985,86 Kč**.
+Říjnové náklady obsahují přesně 842 Kč fixních plateb, listopadové 8 × 842/30 Kč.
+Celkové oceněné náklady jsou 3329,269514553 Kč. Energy má jeden grid zdroj,
+13 entit je načtených, poslední synchronizace skončila stavem `idle` a
+`cost_quality=daily_settlement`. Hodinové importy ověřil jejich zápis přes
+Recorder API; měsíční ceny byly navíc nezávisle přepočteny kontrolním skriptem.
+
+Kontrolní screenshoty jsou lokální soukromé artefakty mimo git v adresáři
+`~/.codex/visualizations/2026/11/09/01a1c02c-47af-7e02-be46-1ff1644098cc/`.
+Běžná synchronizace běží po 12 hodinách a kontroluje posledních 7 dní a
+nejnovější chybějící dny. Přesná publikační doba PND nebyla z jednoho dne
+nezávisle změřena; řešení neposkytuje realtime monitoring.
 
 ## Technické reference
 

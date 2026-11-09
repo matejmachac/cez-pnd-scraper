@@ -56,23 +56,23 @@
   },
   "issues": {
     "authentication": {
-      "title": "ČEZ PND – authentication",
+      "title": "ČEZ PND – Přihlášení vyžaduje pozornost",
       "description": "Ověřte přihlašovací údaje ve stávající aplikaci PND a přístupový token integrace. Detail: {detail}."
     },
     "synchronization": {
-      "title": "ČEZ PND – synchronization",
+      "title": "ČEZ PND – Synchronizace dat se opakuje",
       "description": "PND je dočasně nedostupné nebo změnilo strukturu dat. Integrace opakuje pokus s rostoucím odstupem. Detail: {detail}."
     },
     "missing_measurements": {
-      "title": "ČEZ PND – missing_measurements",
+      "title": "ČEZ PND – Neúplná měřená historie",
       "description": "Některé dny nemají úplné měřené údaje. Nuly se nedoplňují; chybějící dny budou znovu ověřeny. Počet: {detail}."
     },
     "tariff_data": {
-      "title": "ČEZ PND – tariff_data",
+      "title": "ČEZ PND – Neověřené tarifní údaje",
       "description": "Chybí ověřené denní tarify nebo nesouhlasí součty registrů a profilu. Hodinové rozdělení se neodhaduje. Počet: {detail}."
     },
     "price_data": {
-      "title": "ČEZ PND – price_data",
+      "title": "ČEZ PND – Chybějící historický ceník",
       "description": "Pro část historie není potvrzený ceník. Zadejte jej v nastavení integrace a spusťte přepočet nákladů. Počet: {detail}.",
       "fix_flow": {
         "step": {
@@ -84,7 +84,7 @@
       }
     },
     "energy_configuration": {
-      "title": "ČEZ PND – energy_configuration",
+      "title": "ČEZ PND – Nastavení Energy vyžaduje pozornost",
       "description": "Automatická konfigurace Energy byla zastavena kvůli konfliktu nebo validační chybě. Stávající cizí zdroje zůstávají zachovány. Detail: {detail}.",
       "fix_flow": {
         "step": {
