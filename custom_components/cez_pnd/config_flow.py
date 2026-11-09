@@ -65,7 +65,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(
-                    "url", default="http://a894bec6-cez-pnd-scraper:8099"
+                    "url", default="http://a894bec6-cez-pnd-scraper.local.hass.io:8099"
                 ): str,
                 vol.Required("token"): TOKEN,
                 vol.Required("supply_point", default="dubnice"): str,

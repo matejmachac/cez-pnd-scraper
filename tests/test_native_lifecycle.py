@@ -348,3 +348,51 @@ async def test_rollback_stays_disabled_when_legacy_transport_resumes(hass, monke
     assert entry.state is ConfigEntryState.LOADED
     assert entry.runtime_data.data["status"] == "disabled"
     assert entry.runtime_data.archive.state["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_older_tariff_gap_cannot_leave_later_sums_below_the_new_baseline(
+    hass, monkeypatch
+):
+    entry, _ = await simple_entry(hass, monkeypatch, "gap")
+    coordinator = entry.runtime_data
+    await coordinator.synchronize("2026-11-08", "2026-11-08")
+    # An earlier measured day becomes available while the following day lacks
+    # tariff registers. Replaying later known deltas must still be monotonic.
+    from custom_components.cez_pnd.model import normalise_profile
+
+    await coordinator.archive.put(
+        "2026-11-06",
+        {
+            "intervals": normalise_profile(profile("2026-11-06"), "gap"),
+            "registers": [],
+            "opening_registers": [],
+            "tariffs": {
+                "quality": "measured",
+                "resolution": "day",
+                "total": "24",
+                "vt": "4",
+                "nt": "20",
+            },
+            "meter_id": "synthetic",
+        },
+    )
+    await coordinator.archive.put(
+        "2026-11-07",
+        {
+            "intervals": normalise_profile(profile("2026-11-07"), "gap"),
+            "registers": [],
+            "opening_registers": [],
+            "tariffs": {"quality": "tariff_unavailable"},
+            "meter_id": "synthetic",
+        },
+    )
+    await coordinator.publish("2026-11-06", "2026-11-08")
+    result = await coordinator.writer.query(
+        [coordinator.ids["import_vt"]],
+        datetime(2026, 11, 5, tzinfo=UTC),
+        datetime(2026, 11, 9, tzinfo=UTC),
+    )
+    assert [row["sum"] for row in result[coordinator.ids["import_vt"]]] == [4, 8]
+    assert coordinator.archive.state["tariff_quality"] == "incomplete"
+    assert coordinator.archive.state["cost_quality"] == "incomplete"

@@ -351,8 +351,7 @@ class PndCoordinator(DataUpdateCoordinator):
         state = self.archive.state
         baselines = await self.writer.baselines(self.ids.values(), boundary(start))
         increments = {key: {} for key in self.ids}
-        tariff_chain = cost_chain = True
-        tariff_started = cost_started = cost_ready = False
+        cost_ready = False
         unknown_tariffs, unpriced, unknown_cost_days = [], [], []
         last_profile = None
         for day in self._dates(start, end):
@@ -364,10 +363,7 @@ class PndCoordinator(DataUpdateCoordinator):
                 unknown_tariffs.append(day)
                 if price:
                     unknown_cost_days.append(day)
-                if tariff_started:
-                    tariff_chain = False
-                if cost_started:
-                    cost_chain = False
+                increments["cost_total"].update(fixed)
                 continue
             energy = hourly_energy(item["intervals"])
             increments["import_total"].update(energy)
@@ -375,32 +371,27 @@ class PndCoordinator(DataUpdateCoordinator):
             tariffs = item["tariffs"]
             settlement = max(energy)
             # Actual daily snapshots, not an invented hourly tariff curve.
-            if tariffs["quality"] == "measured" and tariff_chain:
-                tariff_started = True
+            if tariffs["quality"] == "measured":
                 for tariff in ("vt", "nt"):
                     increments[f"import_{tariff}"][settlement] = Decimal(
                         tariffs[tariff]
                     )
             else:
                 unknown_tariffs.append(day)
-                if tariff_started:
-                    tariff_chain = False
             charges = daily_cost(tariffs, price)
             if not price:
                 unpriced.append(day)
-                if cost_started:
-                    cost_chain = False
             elif charges is None:
                 unknown_cost_days.append(day)
-                if cost_started:
-                    cost_chain = False
-            elif cost_chain:
-                cost_started = cost_ready = True
+            elif charges is not None:
+                cost_ready = True
                 for tariff in ("vt", "nt"):
                     increments[f"cost_{tariff}"][settlement] = charges[tariff]
                 total = dict(fixed)
                 total[settlement] += charges["vt"] + charges["nt"]
                 increments["cost_total"].update(total)
+            if price and charges is None:
+                increments["cost_total"].update(fixed)
         # At most 744 hours per Recorder job. A crash leaves the acquisition
         # journal dirty; retry starts from the sum strictly before this range.
         for key, values in increments.items():
@@ -422,7 +413,10 @@ class PndCoordinator(DataUpdateCoordinator):
         )
         state["cost_quality"] = (
             "daily_settlement"
-            if cost_ready and cost_chain and not unknown_cost_days
+            if cost_ready
+            and not unknown_cost_days
+            and last_profile
+            and price_for_day(last_profile, self.prices)
             else "incomplete"
         )
         await self.archive.save()  # All expected hours were read back from Recorder.

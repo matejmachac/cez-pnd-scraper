@@ -51,6 +51,13 @@ def api(path, data=None, *, method=None, token=None, base="http://supervisor"):
     return result
 
 
+def transport_url(info):
+    """Use Supervisor-registered DNS, not the Docker container hostname."""
+    names = info.get("dns") or []
+    host = names[0] if names else info["hostname"] + ".local.hass.io"
+    return "http://" + host + ":8099"
+
+
 def app_info(slug):
     return api(f"/addons/{slug}/info")["data"]
 
@@ -86,7 +93,7 @@ def main(args):
         api(f"/addons/{args.app}/options", {"options": options})
         api(f"/addons/{args.app}/restart", {})
         current = app_info(args.app)
-        url = "http://" + current["hostname"] + ":8099"
+        url = transport_url(current)
         transport = api("/v1/info", base=url, token=token)
         if transport.get("writerMode") != "native":
             raise RuntimeError("The legacy writer has not stopped")
