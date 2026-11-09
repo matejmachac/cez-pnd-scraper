@@ -1,0 +1,125 @@
+title: Elektřina NT / VT
+path: elektrina-nt-vt
+type: sections
+max_columns: 2
+sections:
+  - type: grid
+    column_span: 2
+    cards:
+      - type: energy-date-selection
+        grid_options:
+          columns: full
+      - type: markdown
+        content: >-
+          **NT** = nízký tarif · **VT** = vysoký tarif. Vyberte den, měsíc nebo rok nahoře.
+          Tarifní rozdělení je denní; starší období jsou odhady z odečtů.
+        grid_options:
+          columns: full
+  - type: grid
+    cards:
+      - type: heading
+        heading: Spotřeba elektřiny
+        icon: mdi:lightning-bolt
+      - type: horizontal-stack
+        cards:
+          - type: statistic
+            entity: cez_pnd:dubnice_import_nt
+            unit: kWh
+            name: NT
+            stat_type: change
+            period: energy_date_selection
+          - type: statistic
+            entity: cez_pnd:dubnice_import_vt
+            unit: kWh
+            name: VT
+            stat_type: change
+            period: energy_date_selection
+          - type: statistic
+            entity: cez_pnd:consumption_1000684450
+            unit: kWh
+            name: Celkem
+            stat_type: change
+            period: energy_date_selection
+      - type: statistics-graph
+        title: Spotřeba podle tarifu
+        chart_type: bar-stack
+        period: day
+        stat_types: [change]
+        energy_date_selection: true
+        min_y_axis: 0
+        entities:
+          - entity: cez_pnd:dubnice_import_nt
+            unit: kWh
+            name: NT – nízký tarif
+            color: '#42a5f5'
+          - entity: cez_pnd:dubnice_import_vt
+            unit: kWh
+            name: VT – vysoký tarif
+            color: '#ffa726'
+        grid_options:
+          columns: full
+  - type: grid
+    cards:
+      - type: heading
+        heading: Náklady včetně DPH
+        icon: mdi:cash
+      - type: horizontal-stack
+        cards:
+          - type: statistic
+            entity: cez_pnd:dubnice_cost_nt
+            unit: Kč
+            name: NT
+            stat_type: change
+            period: energy_date_selection
+          - type: statistic
+            entity: cez_pnd:dubnice_cost_vt
+            unit: Kč
+            name: VT
+            stat_type: change
+            period: energy_date_selection
+          - type: statistic
+            entity: cez_pnd:dubnice_cost_fixed
+            unit: Kč
+            name: Stálé platby
+            stat_type: change
+            period: energy_date_selection
+      - type: statistics-graph
+        title: Náklady podle tarifu a stálé platby
+        chart_type: bar-stack
+        period: day
+        stat_types: [change]
+        energy_date_selection: true
+        min_y_axis: 0
+        entities:
+          - entity: cez_pnd:dubnice_cost_nt
+            unit: Kč
+            name: NT
+            color: '#42a5f5'
+          - entity: cez_pnd:dubnice_cost_vt
+            unit: Kč
+            name: VT
+            color: '#ffa726'
+          - entity: cez_pnd:dubnice_cost_fixed
+            unit: Kč
+            name: Stálé platby
+            color: '#90a4ae'
+        grid_options:
+          columns: full
+      - type: statistic
+        entity: cez_pnd:dubnice_cost_total
+        unit: Kč
+        name: Celkem včetně stálých plateb
+        stat_type: change
+        period: energy_date_selection
+        grid_options:
+          columns: full
+      - type: markdown
+        content: >-
+          Ceny jsou dopočtené podle faktury a období platnosti ceníků.
+          **Před 18. 9. 2025 chybí cenové podklady** — náklady za tuto část historie nejsou zahrnuté.
+      - type: button
+        name: Celkový odběr v Energy
+        icon: mdi:chart-bar
+        tap_action:
+          action: navigate
+          navigation_path: /energy/electricity
