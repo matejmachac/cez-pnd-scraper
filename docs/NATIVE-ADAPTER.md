@@ -97,7 +97,7 @@ Při návratu k samostatnému provozu lze po rollbacku vrátit aplikaci do reži
 `legacy`. Pomocník `deploy/native_deploy.py rollback` provede obě části v tomto
 pořadí a použije soukromou zálohu původních voleb aplikace uloženou přímo v HA.
 
-Nativní akce: `backfill`, `recalculate_costs`, `rollback`, `export_history`.
+Nativní akce: `backfill`, `recalculate_costs`, `rollback`, `resume`, `export_history`.
 Žádné helpery, utility metery, MQTT topics ani ručně upravovaný YAML.
 
 ## Nasazení a vývoj
@@ -123,3 +123,15 @@ Ověření zahrnuje Config/Options Flow, skutečný import a zpětné čtení Re
 opakování a opravy, restart po získání dat před zápisem, reload a odinstalaci,
 změnu ceny, auth/reauth, explicitní migraci cizího zdroje a rollback.
 Syntetické testy nenahrazují ověření dostupnosti skutečné historie v PND.
+
+
+Verze 0.5.1 rozlišuje autoritativní hlášení portálu o období bez zdrojů od
+neúplného měření a dočasného výpadku. Nedostupný měsíc se během běhu dotáže
+jednou a nenutí opakované přihlášení. Pravidelná oprava upřednostňuje nejnovější
+chybějící dny, aby neúplný začátek historie neblokoval skutečné pozdější výpadky.
+Výslovná akce `backfill` umí obnovit import i po rollbacku; předem znovu ověří
+vlastníka zápisu a vyjedná dostupné možnosti transportu.
+
+Pro kontrolu archivu lze v HA terminálu použít `deploy/audit_history.py`.
+Nástroj pouze čte vlastní archiv a vypisuje měsíční součty a kvalitu; nečte ani
+nevypisuje PND přihlašovací údaje, tokeny, URL nebo fyzická ID měřičů.

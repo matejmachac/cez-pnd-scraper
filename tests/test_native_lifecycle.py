@@ -475,3 +475,28 @@ async def test_no_source_month_is_cached_and_not_retried_as_missing(hass, monkey
     assert coordinator.archive.state["enabled"] is True
     assert coordinator.closed is False
     assert coordinator.monthly is False  # Resume refreshes negotiated capabilities.
+
+
+@pytest.mark.asyncio
+async def test_recent_measurement_gap_is_not_starved_by_empty_early_history(
+    hass, monkeypatch
+):
+    from custom_components.cez_pnd.api import IncompleteMeasurement
+
+    entry, _ = await simple_entry(hass, monkeypatch, "gap_priority")
+    coordinator = entry.runtime_data
+    await coordinator.synchronize("2026-11-07", "2026-11-08")
+    coordinator.archive.state["missing_days"] = [
+        f"2026-07-{day:02}" for day in range(1, 31)
+    ] + ["2026-08-20"]
+    requested = []
+
+    async def incomplete(day):
+        requested.append(day)
+        raise IncompleteMeasurement("Not measured")
+
+    monkeypatch.setattr(coordinator, "_profile", incomplete)
+    await coordinator.synchronize(end="2026-11-08")
+    assert "2026-08-20" in requested
+    assert "2026-07-30" in requested
+    assert "2026-07-01" not in requested

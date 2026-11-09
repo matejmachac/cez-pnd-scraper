@@ -247,7 +247,9 @@ class PndCoordinator(DataUpdateCoordinator):
                     - timedelta(days=self.entry.options.get("correction_days", 7) - 1),
                 )
                 dates = self._dates(first.isoformat(), end)
-                dates = sorted(set(dates + state.get("missing_days", [])[:14]))
+                # Prioritize recent gaps, so an empty pre-activation prefix
+                # cannot starve actual outages within measured history.
+                dates = sorted(set(dates + state.get("missing_days", [])[-14:]))
             if not dates:
                 return
             pending = state.get("pending")

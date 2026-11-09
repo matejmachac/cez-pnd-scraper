@@ -1,153 +1,131 @@
-# Audit a stav implementace (9. listopadu 2026)
+# Audit implementace a nasazení – 9. listopadu 2026
 
-Toto není potvrzení splnění celého implementačního zadání. Nové změny zatím
-nebyly nasazeny do produkčního add-onu ani ověřeny proti jeho Recorderu.
+## Výchozí řešení
 
-## Ověřený výchozí stav
+Repozitář původně obsahoval HAOS aplikaci 0.4.1, nikoli HA Custom Integration.
+Playwright/Chromium se přihlašuje přes CAS a uchovává soukromou session v
+`/data/browser-state.json`. CSV export dekóduje Windows-1250; průměrný výkon
+čtvrthodinového profilu dělí čtyřmi na kWh. Původní import zapisoval externí
+hodinové statistiky přes Supervisor WebSocket a uchovával checkpoint v
+`/data/state.json`. Energy již používalo jeden PND grid zdroj. Tato identita
+celkové spotřeby byla zachována, historie se nemaže.
 
-- Repozitář obsahuje HAOS add-on 0.4.1, nikoliv HA Custom Integration.
-- Přihlášení: Playwright/Chromium, CAS formulář, soukromá browser session v
-  `/data/browser-state.json`, jeden pokus o obnovu čisté session. Neměníme je.
-- Získávání: první datové okno PND, volba období, vyčkání XHR/fetch, CSV export
-  dekódovaný jako Windows-1250. Parser zná jen `Datum`, `+A/<ELM> [kW]`, `Status`.
-  Z naměřené čtvrthodinové průměrné hodnoty kW počítá kWh jako kW / 4.
-- Backfill: od explicitního data nebo po posledním úspěšném dni, připraví celý
-  rozsah a přehraje navazující kumulativní sumy. Neúplný den blokuje celý rozsah.
-  Původně chyběl archiv jednotlivých měření a checkpoint získávání jednotlivých dní.
-- Původní perzistence: atomicky přejmenovaný JSON `/data/state.json`, přihlašovací
-  stav a screenshot poslední chyby. Naměřené hodnoty byly pouze v HA Recorderu.
-- HA transport: Supervisor token, `recorder/import_statistics` přes WebSocket,
-  externí ID `cez_pnd:consumption_<ELM>`. Neexistují vlastní entity ani Config Flow.
-- Instalace: privátní repozitář add-onu, Docker image Playwright Noble, `npm ci`,
-  Node >=24 dle package.json. Lokální Node je 22.23.2 a Python 3.15.0; to nejsou
-  verze produkčního kontejneru. Produkční Python zatím nebyl zjištěn.
-- Živé HA před aktualizací: Core 2026.10.4, Supervisor 2026.10.5, HAOS 18.3,
-  Frontend 20260930.5. Add-on 0.4.1 běží. Logy potvrzují import 1.–8. 11. 2026.
-- Nativní Energy Dashboard obsahuje jeden PND grid zdroj a zobrazuje pro
-  8. 11. 2026 celkem 51,35 kWh. Zobrazených 0 Kč není ověřená skutečná cena.
-- Produkční log obsahuje i neúplný export 20. 8. 2026 (89/96 naměřených intervalů,
-  zbytek výpadek/neplatná data). Takový den nesmí být doplněn smyšlenými nulami.
-- Původní fixtures byly syntetické. Živý portál 2.6.1 následně potvrdil sestavu
-  **17 Registry za den (+E, -E)**, nikoli měsíční registry uvedené v zadání.
-  Poskytuje `+E`, `-E`, `+E_NT`, `+E_VT` v kWh na konci místního dne (24:00).
-  Označení OBIS 1.8.0/1.8.1/1.8.2 export výslovně neobsahuje.
-  V rychlé sestavě není nabízena sestava 18; její dostupnost jinde nebyla prokázána.
-  Export má opakované trojice Datum/hodnota/Status a americké oddělovače
-  tisíců a desetinných míst (`2,288.142`). DOM používá české formátování.
-  Naměřený export byl stažen do uživatelských Downloads, do repa patří pouze
-  anonymizované kontrolní hodnoty v `test/registers.test.js`.
-- Odečty 7./8. listopadu dávají spotřebu 8. listopadu VT 5,160 kWh,
-  NT 46,186 kWh a celkem 51,346 kWh. Sestava 07 pro tentýž den uvádí
-  rovněž 51,346 kWh; HA zobrazuje zaokrouhlených 51,35 kWh.
-  V průběhu 9. listopadu má sestava 07 pro aktuální den částečných 0,785 kWh,
-  budoucí dny 0,0, zatímco registry budoucích dnů mají pomlčky. Nuly
-  budoucích dnů se proto nikdy nesmějí importovat jako dokončená měření.
-  Nejstarší dostupná historie ani přesná publikační frekvence nejsou ověřeny.
+Původní Core 2026.10.4 a HAOS 18.3 byly se souhlasem uživatele aktualizovány na
+Core **2026.11.0** a HAOS **18.4**, se zálohou a ověřeným návratem po restartu.
+Supervisor zůstal 2026.10.5. Testy používají skutečný Core 2026.11.0 na Pythonu
+3.14 a SQLite Recorder, nikoli simulaci HA API.
 
-## Zvolené rozšíření existujícího transportu
+## Ověřené skutečné zdroje PND
 
-`history.js` ukládá validovaná původní i normalizovaná měření do soukromého
-`/data/history/<hash-odběrného-místa>/<datum>.json`. UTC intervaly mají fyzický
-měřič, energii, neznámý tarif (null), zdroj, kvalitu, úplnost a čas získání.
-Denní upsert má obsahový hash a revizi; nemění se jen kvůli novému času získání.
-Změny se zaznamenávají revizí, předchozí verze jednotlivých měření se nearchivují.
-`pending-plan.json` umožňuje navázat získávání stejného přerušeného rozsahu bez
-opakovaného přihlášení a exportu již dokončených dní. Dokončený backfill se při
-novém explicitním požadavku načítá z PND znovu.
+PND 2.6.1 poskytuje sestavu **01 Profil spotřeby (+A)** v kW, sestavu **07**
+s denní energií a sestavu **17 Registry za den (+E,-E)** v kWh. Číslo 17 tedy
+v tomto účtu neoznačuje měsíční registry ze zadání. Export obsahuje `+E`,
+`+E_NT`, `+E_VT`; konkrétní kódy OBIS v něm nejsou výslovně uvedeny.
+Sestava 18 nebyla v dostupné rychlé sestavě nabídnuta. Virtuální tarify nemají
+žádné záznamy; nevytváříme z nich údajné autoritativní hodinové měření.
 
-Běžný provoz znovu kontroluje posledních 7 již importovaných dní (nastavitelné
-`correction_days`, 0–90). Reimportuje i navazující hodiny, aby oprava nezpůsobila
-skok kumulativní sumy. Připravený rozsah se zatím stále zapisuje jedním HA
-požadavkem, nikoli Recorderem potvrzovanými dávkami. Exponenciální retry má strop
-6 hodin. Souběh je blokován pro stejný objekt úložiště v jednom procesu;
-neposkytuje distribuovaný zámek mezi dvěma instancemi add-onu.
+Každý kanál má vlastní trojici Datum/hodnota/Status. Odečet ve 24:00 patří
+konci místního dne; UTC hranice respektuje Europe/Prague a DST. Čísla závisí
+na jazyku browseru: en-US export `2,288.142`, český Playwright export
+`2 288,142`. Verze 0.5.1 používá explicitní jazyk exportu a správně čte i
+české `371,439` pod 1000 kWh. Regresní test zahrnuje skutečný zjištěný formát.
 
-`pricing.js` je samostatný cenový model, dosud nepřipojený k produkčnímu importu.
-Výchozí potvrzené ceny platí konzervativně jen 1. 10.–31. 12. 2026. Neznámé ceny
-2025/2027 se nepřebírají. Desetinné částky používají interně BigInt v miliardtinách
-Kč. Fixní měsíční částka se rozdělí nejprve podle kalendářních dní a poté podle
-23/24/25 hodin dne; rozdíly celočíselných hranic zachovají přesných 842 Kč/měsíc.
-Celkové náklady zůstávají null, pokud není známý tarif nebo chybí měření.
-Tento modul sám nevytváří nákladové statistiky ani cenové entity.
-`registers.js` parsuje skutečně ověřený formát a odvozuje denní VT/NT pouze
-z navazujících odečtů stejného elektroměru. Rozpozná výměnu, reset, chybějící
-registry a nesoulad s profilem. `priceDailyTariffs` oceňuje denní součty bez
-vymyšleného hodinového rozložení. `scrapeRegistersDate` používá stávající
-přihlašování a po čtení vrací okno do sestavy 01. Pravidelný scheduler tuto
-metodu ještě nevolá.
+Referenční 8. listopad: profil **51,34575 kWh**, denní sestava 07 **51,346 kWh**,
+rozdíl registrů **VT 5,160 + NT 46,186 = 51,346 kWh**. Rozdíl profilu a
+registrů odpovídá zaokrouhlení registrů na 0,001 kWh. Cena podle dodaného ceníku
+je VT 21,64847040 Kč, NT 158,10114404 Kč, fixní část 842/30 Kč,
+celkem **207,8162811067 Kč**. Registry jsou denní, ne hodinové; tarifní
+spotřebu ani náklady nevymýšlíme rovnoměrným dělením po hodinách.
 
-## Energy preferences a návrat
+Budoucí řádky PND mohou obsahovat nuly/pomlčky a nejsou dokončeným měřením.
+Například 20. srpen obsahuje jen 89/96 naměřených intervalů; neúplné dny
+se nedoplňují nulami. Výslovné hlášení portálu „Pro danou konfiguraci nejsou
+k dispozici žádné datové zdroje“ se odlišuje od výpadku, změny schématu a
+neúplného exportu; nezpůsobuje zbytečné mazání přihlašovací session.
 
-Automatická konfigurace dál používá jeden unified grid zdroj s celkovou energií.
-Volitelný `stat_cost` je připraven ve funkci vytvářející zdroj, ale zatím se
-nepředává z importu. VT/NT se nevytvářejí bez doložených vstupních měření.
+## Architektura
 
-Před novým zápisem se uloží úplné původní preferences a vlastněný nový zdroj
-v `/data/energy-backup.json`. Cizí grid import vyvolá konflikt namísto potenciálního
-zdvojení spotřeby; existující vlastní ID je rozpoznáno i ve starším flow_from.
-Po novém zápisu se kontroluje `energy/validate`; při chybě se odstraní pouze
-přidaný zdroj. Žádný přímý zápis do `.storage/energy` ani databáze Recorderu.
+Stávající aplikace 0.5.1 zachovává CAS a Chromium. V režimu `native` slouží
+pouze jako autentizovaný transport měření; původní scheduler a zapisovač jsou
+vypnuté. Režim `legacy` zachovává samostatné původní použití. HA Core nemá
+browser runtime; jeho přidání do Core by vyžadovalo přepis funkčního transportu.
 
-Pro ruční návrat: zastavit scheduler, nastavit `add_to_energy_dashboard: false`,
-v prostředí add-onu spustit `node /app/src/rollback.js` se stejnými Supervisor
-credentials. Skript odstraní pouze nezměněný zdroj doložený zálohou a zachová
-mezitím přidané cizí zdroje. Pokud byl zdroj uživatelem upraven, odmítne jej
-smazat. Původní již existující zdroj bez zálohy není automaticky odstraňován.
-Statistiky a archiv zůstávají zachovány. Tento rollback je ověřen lokálními testy,
-ne produkčním přepnutím.
+Python komponenta `custom_components/cez_pnd` vlastní Config/Options/Reauth
+Flow, zařízení se 13 entitami, Repairs a služby. Připojení přes
+`supervisor://<slug>` zjišťuje aktuální IP aplikace pomocí Supervisor API;
+nespoléhá na v tomto nasazení nefunkční `.local.hass.io` DNS ani pevnou IP.
+Transportní token umožňuje jen lokální čtení měření. PND heslo zůstává v aplikaci.
 
-## Další nutné etapy
+HA Store archivuje měsíce s UTC intervaly, fyzickým měřičem, zdrojem, kvalitou,
+registrem na obou hranicích dne, hashem, revizí a časem získání. Samostatný stav
+obsahuje checkpoint a chybějící/nedostupná období. Nový měsíční export při
+opravě obnovuje **obě** hranice dne, i když předchozí archiv obsahuje staré hodnoty.
+První průzkum pokrývá až 36 měsíců. Běžná kontrola obnovuje posledních 7 dní a
+omezenou dávku chybějících měření. Nedostupné měsíce se nestahují každý den.
 
-1. Rozšířit ověření PND na historii, výměnu měřiče a případné další sestavy;
-   denní registry a konec dne již byly ověřeny.
-2. Zvolit transport do HA Core s ohledem na nutnost browser runtime; HA Core
-   standardně nemá Node ani Chromium. Nevkládat neověřený přepis CAS přihlášení.
-3. Implementovat nativní Python adaptér, Config/Options/Reauth Flow, zařízení,
-   diagnostické entity, Repairs a služby backfill/reprice/rollback.
-4. Propojit doložená tarifní data s cenovým modelem a importovat externí energetické
-   a peněžní statistiky přes `async_add_external_statistics` jako jediný zapisovač.
-5. Vyřešit stabilní identitu odběrného místa při výměně elektroměru; dosavadní
-   import výměnu odmítá, místo aby smísil nesouvisející registry.
-6. Doplnit ověřování každé dávky přes Recorder API, detekci ztracených statistik,
-   skutečné ceny nastavitelné z UI a nedestruktivní migraci existujícího ID.
-7. Ověřit všech 15 scénářů zadání na skutečném HA včetně migrace, restartu,
-   historických oprav, odinstalace a návratu. Lokální syntetické testy nejsou
-   náhradou těchto integračních testů.
+Jediný zapisovač používá `async_add_external_statistics`, explicitní metadata
+HA 2026.11 a dávky nejvýše 744 hodin. Každou dávku ověřuje zpětným čtením přes
+Recorder API; checkpoint neposouvá jen na základě zařazení do fronty. Při opravě
+přehrává navazující kumulativní součty, aby nevznikly záporné skoky. Entity
+nemají `state_class`, a proto nekompilují druhou kopii těchto statistik.
+
+## Ceny a Energy
+
+Jedna grid source zachovává původní celkovou energii a používá externí
+`cost_total`. Dalších šest statistik obsahuje VT/NT a jednotlivé náklady;
+tarify se do energetického toku podruhé nepřičítají. Konfigurace probíhá přes
+`EnergyManager.async_update` a oficiální validaci; žádný přímý zápis do
+`.storage/energy` nebo DB Recorderu.
+
+Potvrzený výchozí ceník pokrývá **1. 10.–31. 12. 2026**: VT 4,19544 Kč/kWh,
+NT 3,42314 Kč/kWh, fixní složka 842 Kč/měsíc včetně DPH. Ceny před říjnem a
+regulované ceny 2027 nejsou potvrzené a nedosazují se. Options Flow umožňuje
+verzované intervaly a samostatnou změnu VT/NT/fixní složky. Fixní část se dělí
+podle kalendářních dní a 23/24/25 hodin tak, aby celý měsíc činil přesně 842 Kč.
+Zálohy, starý nedoplatek a bankovní pohyby do nákladů nevstupují.
+
+## Migrace a návrat
+
+Soukromá záloha původních voleb aplikace a nový transportní token jsou pouze
+v `/config/.cez_pnd_migration`, oprávnění 700/600. Energy záloha je součástí
+vlastního HA Store. Cizí zdroje se zachovávají. Neznámý cizí grid vyvolá
+konflikt; Options Flow dovoluje výslovné označení zdroje stejného místa.
+
+Akce `cez_pnd.rollback` vypne nový import a vrátí vlastní změnu Energy.
+Byla skutečně spuštěna při opravě registrů; historie zůstala zachovaná.
+Vypnutí přetrvá restart Core. Výslovný `backfill` umí bezpečně obnovit zvolený
+rozsah po kontrole, že transport je v nativním režimu. Úplný návrat včetně
+původního scheduleru provede v HA terminálu:
+
+```sh
+python3 /config/cez_pnd_deploy/native_deploy.py rollback --app a894bec6_cez_pnd_scraper
+```
+
+Statistiky se nemažou ani při odinstalaci integrace. Pokud uživatel mezitím
+změní vlastněný Energy zdroj, rollback jej automaticky nepřepisuje.
+
+## Ověření
+
+- Python: **26 testů prošlo** na skutečném HA Core 2026.11.0/Recorder/Energy.
+- Node: **73 testů prošlo**, 8 Chromium scénářů se spouští samostatně.
+- Chromium: **8 scénářů prošlo**, včetně českých registrů a období bez zdrojů.
+- JS syntaxe, Ruff a whitespace kontrola prošly.
+
+Scénáře zahrnují čistou instalaci, existující Energy, opakování importu,
+opravy, přerušený checkpoint/restart, výpadek/auth/reauth, chybějící den,
+DST, reset/výměnu měřiče, nulovou spotřebu s fixním poplatkem, změnu ceníku,
+upgrade/reload, konflikty cizích zdrojů, rollback a odinstalaci bez ztráty dat.
+
+Nasazení 0.5.1 a Core restart jsou ověřené. Konečný rozsah skutečně dostupné
+historie, měsíční součty a zobrazení nákladů se doplňují po dokončení běžícího
+produkčního backfillu; referenční faktura 2025/2026 se bez příslušných původních
+měření nesmí považovat za nezávisle rekonstruovanou.
 
 ## Technické reference
 
-Přečtené zdroje Core (2026.11.0):
+Kontrolované zdroje skutečného Core 2026.11.0:
+
 - https://github.com/home-assistant/core/blob/2026.11.0/homeassistant/components/opower/coordinator.py
 - https://github.com/home-assistant/core/blob/2026.11.0/homeassistant/components/energy/data.py
 - https://github.com/home-assistant/core/blob/2026.11.0/homeassistant/components/energy/websocket_api.py
 - https://github.com/home-assistant/core/blob/2026.11.0/homeassistant/components/recorder/statistics.py
-
-Unified grid schéma a `stat_cost` byly navíc porovnány s `energy/data.py` ve
-verzi 2026.10.4. Přítomnost schématu `cost_adjustment_day` sama neprokazuje správné
-historické vyúčtování fixních cen; nový cenový model se na tuto položku nespoléhá.
-
-## Provedené systémové aktualizace a ověření
-
-Na výslovný pokyn uživatele byl Core aktualizován z 2026.10.4 na **2026.11.0**.
-Byla zapnuta automatická záloha před aktualizací; UI následně potvrdilo čerstvou
-zálohu. HAOS byl aktualizován z 18.3 na **18.4** a byl proveden řízený restart
-hostitele. Po návratu HA byly aktivní verze potvrzeny jak v About, tak v terminálu.
-Supervisor zůstal 2026.10.5. Add-on 0.4.1 má po restartu stav `started`.
-Energy Dashboard i po obou aktualizacích zobrazuje 8. listopadu 51,35 kWh.
-
-Snímky ověření: `/tmp/cez-pnd-verification/ha-updated.jpg` a
-`/tmp/cez-pnd-verification/energy-after-update.jpg` (dočasné lokální soubory,
-nezahrnovat do veřejného repozitáře).
-
-Lokální validace konečného pracovního stromu:
-- `npm test`: 68 úspěšných testů, 6 browser scénářů standardně přeskočeno.
-- `npm run test:browser`: všech 6 skutečných Chromium scénářů úspěšných.
-- `npm run check`: syntaktická kontrola všech zdrojových JS souborů úspěšná.
-- `git diff --check`: bez chyb whitespace.
-
-Testy pokrývají původní scraping, opakovaný backfill a retry po nejednoznačném
-potvrzení, DST, neúplná měření, opravu období, archiv/revize/restart checkpointu,
-konkurenci, registry a reset/výměnu měřiče na úrovni modelu, skutečné kontrolní
-hodnoty PND, ceny a fixní měsíční součty, ochranu cizích zdrojů a bezpečný rollback.
-Nepokrývají dosud nativní Python integraci a její lifecycle, protože není vytvořena.
-Nebylo provedeno nové produkční nahrání historie ani nasazení změněného add-onu.
