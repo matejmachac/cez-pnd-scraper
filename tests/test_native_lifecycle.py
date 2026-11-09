@@ -474,3 +474,4 @@ async def test_no_source_month_is_cached_and_not_retried_as_missing(hass, monkey
     )
     assert coordinator.archive.state["enabled"] is True
     assert coordinator.closed is False
+    assert coordinator.monthly is False  # Resume refreshes negotiated capabilities.

@@ -491,7 +491,8 @@ class PndCoordinator(DataUpdateCoordinator):
         self._notify("disabled")
 
     async def resume(self, start=None, end=None):
-        await self.api.info()  # Never resume while the legacy writer is active.
+        info = await self.api.info()  # Never resume while the legacy writer is active.
+        self.monthly = "month" in info.get("capabilities", [])
         self.archive.state["enabled"] = True
         self.closed = False
         await self.archive.save()
