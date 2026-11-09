@@ -36,6 +36,7 @@ from .model import (
 )
 from .statistics import StatisticsWriter
 from .storage import Archive
+from .manual import build_estimates, KNOWN_TARIFFS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -376,6 +377,88 @@ class PndCoordinator(DataUpdateCoordinator):
             self._notify("idle")
             await self.archive.save()
 
+    async def refresh_manual(self):
+        anchors = self.archive.state.get("manual_anchors")
+        if not anchors:
+            return None
+        if not self.archive.state.get("manual_enabled", True):
+            return await self.archive.replace_manual({})
+        measured = {
+            day: item
+            for day in self.archive.state.get("days", [])
+            if (item := await self.archive.measured(day))
+        }
+        days, conflicts = build_estimates(anchors, measured)
+        self.archive.state["manual_conflicts"] = conflicts
+        self._issue("manual_data", bool(conflicts), str(len(conflicts)))
+        return await self.archive.replace_manual(days)
+
+    async def disable_manual(self):
+        if self.lock.locked():
+            raise HomeAssistantError("PND synchronization is already running")
+        async with self.lock:
+            days = self.archive.state.get("manual_days", [])
+            if not days:
+                return
+            self.archive.state["manual_pending_from"] = min(days)
+            self.archive.state["manual_enabled"] = False
+            await self.archive.save()
+            await self.publish(min(days), max(self.archive.state["days"]))
+            self._notify("idle")
+            await self.archive.save()
+
+    async def import_manual(self, payload):
+        if self.lock.locked():
+            raise HomeAssistantError("PND synchronization is already running")
+        if not self.archive.state.get("enabled", True) or self.closed:
+            raise HomeAssistantError(
+                "Resume the native importer before importing manual readings"
+            )
+        if (
+            payload.get("schema_version") != 1
+            or payload.get("supply_point") != self.supply_point
+        ):
+            raise HomeAssistantError(
+                "Manual history belongs to a different supply point"
+            )
+        anchors = payload["anchors"]
+        today = dt_util.utcnow().astimezone(PRAGUE).date()
+        if any(parse_date(row["boundary"]) > today for row in anchors):
+            raise HomeAssistantError("Manual history must contain completed days")
+        async with self.lock:
+            await self.api.info()
+            measured = {
+                day: item
+                for day in self.archive.state.get("days", [])
+                if (item := await self.archive.measured(day))
+            }
+            days, conflicts = build_estimates(anchors, measured)
+            if conflicts:
+                raise HomeAssistantError(
+                    "Manual readings conflict with measured PND data"
+                )
+            if not days:
+                raise HomeAssistantError("Manual history contains no estimated days")
+            self.archive.state.setdefault(
+                "manual_original_start", min(self.archive.state.get("days") or days)
+            )
+            self.archive.state["manual_enabled"] = True
+            self.archive.state["manual_anchors"] = anchors
+            self.archive.state["manual_source"] = payload.get("source", {})
+            changed = await self.archive.replace_manual(days)
+            self.archive.state["manual_pending_from"] = min(
+                changed or min(days),
+                self.archive.state.get("manual_pending_from") or min(days),
+            )
+            await self.archive.save()
+            self._notify("publishing")
+            await self.publish(
+                self.archive.state["manual_pending_from"],
+                max(self.archive.state["days"]),
+            )
+            self._notify("idle")
+            await self.archive.save()
+
     async def publish(self, start, end):
         """Replay later cumulative sums in bounded, verified Recorder batches."""
         state = self.archive.state
@@ -384,6 +467,11 @@ class PndCoordinator(DataUpdateCoordinator):
         await (
             self.api.info()
         )  # Recheck ownership even when measurements came from cache.
+        changed = await self.refresh_manual()
+        if changed:
+            start = min(start, changed)
+        if state.get("manual_pending_from"):
+            start = min(start, state["manual_pending_from"])
         baselines = await self.writer.baselines(self.ids.values(), boundary(start))
         increments = {key: {} for key in self.ids}
         cost_ready = False
@@ -393,26 +481,58 @@ class PndCoordinator(DataUpdateCoordinator):
             item = await self.archive.get(day)
             price = price_for_day(day, self.prices)
             fixed = fixed_hourly(day, price) if price else {}
+            if not state.get("manual_enabled", True) and day < state.get(
+                "manual_original_start", day
+            ):
+                fixed = {instant: Decimal(0) for instant in fixed}
             increments["cost_fixed"].update(fixed)
             if item is None:
-                unknown_tariffs.append(day)
+                retired = (
+                    not state.get("manual_enabled", True)
+                    and day in state.get("manual_published_days", [])
+                    and day not in state.get("days", [])
+                )
+                if not retired:
+                    unknown_tariffs.append(day)
                 if price:
                     unknown_cost_days.append(day)
                 increments["cost_total"].update(fixed)
+                if day in state.get("manual_published_days", []):
+                    instant = boundary(parse_date(day) + timedelta(days=1)) - timedelta(
+                        hours=1
+                    )
+                    for key in (
+                        "import_total",
+                        "import_vt",
+                        "import_nt",
+                        "cost_vt",
+                        "cost_nt",
+                    ):
+                        increments[key][instant] = Decimal(0)
                 continue
-            energy = hourly_energy(item["intervals"])
+            energy = (
+                hourly_energy(item["intervals"])
+                if item["intervals"]
+                else {
+                    boundary(parse_date(day) + timedelta(days=1))
+                    - timedelta(hours=1): Decimal(item["daily_kwh"])
+                }
+            )
             increments["import_total"].update(energy)
             last_profile = day
             tariffs = item["tariffs"]
             settlement = max(energy)
             # Actual daily snapshots, not an invented hourly tariff curve.
-            if tariffs["quality"] == "measured":
+            if tariffs["quality"] in KNOWN_TARIFFS:
                 for tariff in ("vt", "nt"):
                     increments[f"import_{tariff}"][settlement] = Decimal(
                         tariffs[tariff]
                     )
             else:
                 unknown_tariffs.append(day)
+                if day in state.get("manual_published_days", []):
+                    for key in ("import_vt", "import_nt", "cost_vt", "cost_nt"):
+                        increments[key][settlement] = Decimal(0)
             charges = daily_cost(tariffs, price)
             if not price:
                 unpriced.append(day)
@@ -437,6 +557,7 @@ class PndCoordinator(DataUpdateCoordinator):
                     dict(ordered[offset : offset + 744]),
                     baselines[self.ids[key]],
                     cost=key.startswith("cost_"),
+                    estimated=bool(state.get("manual_days")),
                 )
         if last_profile:
             state["last_published"] = last_profile
@@ -455,7 +576,14 @@ class PndCoordinator(DataUpdateCoordinator):
         for day in self._dates(coverage_start, coverage_end):
             if price_for_day(day, self.prices):
                 item = await self.archive.get(day)
-                if item is None or item["tariffs"]["quality"] != "measured":
+                retired = (
+                    not state.get("manual_enabled", True)
+                    and day in state.get("manual_published_days", [])
+                    and day not in state.get("days", [])
+                )
+                if not retired and (
+                    item is None or item["tariffs"]["quality"] not in KNOWN_TARIFFS
+                ):
                     incomplete_cost_days.append(day)
         state["incomplete_cost_days"] = incomplete_cost_days
         active_gaps = [
@@ -477,8 +605,28 @@ class PndCoordinator(DataUpdateCoordinator):
             day
             for day in state.get("days", [])
             if (item := await self.archive.get(day))
-            and item["tariffs"]["quality"] != "measured"
+            and item["tariffs"]["quality"] not in KNOWN_TARIFFS
         ]
+        state["estimated_days"] = [
+            day
+            for day in state.get("days", [])
+            if (item := await self.archive.get(day))
+            and item["tariffs"]["quality"] == "estimated_daily"
+        ]
+        if state["estimated_days"] and state["tariff_quality"] == "daily_measured":
+            state["tariff_quality"] = "daily_measured_and_estimated"
+        if (
+            state["cost_quality"]
+            in ("daily_settlement", "daily_settlement_with_estimates")
+            and current_price
+            and any(day >= current_price["from"] for day in state["estimated_days"])
+        ):
+            state["cost_quality"] = "daily_settlement_with_estimates"
+        state["manual_published_days"] = sorted(
+            set(state.get("manual_published_days", []))
+            | set(state.get("manual_days", []))
+        )
+        state.pop("manual_pending_from", None)
         await self.archive.save()  # All expected hours were read back from Recorder.
         self._issue(
             "tariff_data",
@@ -493,9 +641,11 @@ class PndCoordinator(DataUpdateCoordinator):
                 await self.energy.configure(
                     self.ids["import_total"],
                     self.ids["cost_total"]
-                    if state["cost_quality"] == "daily_settlement"
+                    if state["cost_quality"]
+                    in ("daily_settlement", "daily_settlement_with_estimates")
                     else None,
                     replace_source=self.entry.options.get("replace_source"),
+                    estimated=bool(state.get("estimated_days")),
                 )
             self._issue("energy_configuration", False)
         except EnergyConflictError:

@@ -1,6 +1,8 @@
 """ČEZ PND: native Energy integration with existing browser transport."""
 
 from datetime import timedelta
+import json
+from pathlib import Path
 import probatio as vol
 from homeassistant.const import Platform
 from homeassistant.core import SupportsResponse
@@ -124,6 +126,26 @@ def _register_services(hass):
     async def resume(call):
         await coordinator_for(call).resume()
 
+    async def disable_manual(call):
+        await coordinator_for(call).disable_manual()
+
+    async def import_manual(call):
+        coordinator = coordinator_for(call)
+        root = Path(hass.config.path()).resolve()
+        path = (root / call.data["file"]).resolve()
+        if not path.is_relative_to(root) or path.suffix != ".json":
+            raise HomeAssistantError(
+                "Select a JSON file inside the HA configuration directory"
+            )
+
+        def load():
+            if path.stat().st_size > 4_000_000:
+                raise HomeAssistantError("Manual reading file exceeds 4 MB")
+            return json.loads(path.read_text())
+
+        payload = await hass.async_add_executor_job(load)
+        await coordinator.import_manual(payload)
+
     async def export_history(call):
         coordinator = coordinator_for(call)
         start, end = period(call, coordinator)
@@ -132,6 +154,18 @@ def _register_services(hass):
             "days": await coordinator.archive.export(start, end),
         }
 
+    hass.services.async_register(
+        DOMAIN,
+        "import_manual_history",
+        import_manual,
+        schema=vol.Schema({vol.Optional("entry_id"): str, vol.Required("file"): str}),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "disable_manual_history",
+        disable_manual,
+        schema=vol.Schema({vol.Optional("entry_id"): str}),
+    )
     hass.services.async_register(DOMAIN, "backfill", backfill, schema=schema)
     hass.services.async_register(DOMAIN, "recalculate_costs", reprice, schema=schema)
     hass.services.async_register(

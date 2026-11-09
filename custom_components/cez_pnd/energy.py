@@ -14,7 +14,9 @@ class EnergyConfiguration:
         self.hass = hass
         self.archive = archive
 
-    async def configure(self, energy_id, cost_id=None, *, replace_source=None):
+    async def configure(
+        self, energy_id, cost_id=None, *, replace_source=None, estimated=False
+    ):
         manager = await async_get_manager(self.hass)
         preferences = deepcopy(manager.data or manager.default_preferences())
         sources = deepcopy(preferences["energy_sources"])
@@ -57,6 +59,13 @@ class EnergyConfiguration:
                 "cost_adjustment_day": 0,
             }
         )
+        if estimated:
+            self.archive.state.setdefault(
+                "manual_energy_name", desired.get("name", "ČEZ PND")
+            )
+            desired["name"] = "Dubnice – PND a denní odhady z odečtů"
+        elif self.archive.state.get("manual_energy_name"):
+            desired["name"] = self.archive.state["manual_energy_name"]
         desired["stat_energy_from"] = energy_id
         if cost_id:
             desired.update(
@@ -65,6 +74,9 @@ class EnergyConfiguration:
                 number_energy_price=None,
                 cost_adjustment_day=0,
             )
+        else:
+            for key in ("stat_cost", "entity_energy_price", "number_energy_price"):
+                desired.pop(key, None)
         desired = ENERGY_SOURCE_SCHEMA([desired])[0]
         if old == desired:
             return

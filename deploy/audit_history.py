@@ -26,35 +26,59 @@ def audit(root="/config/.storage"):
         }
     )
     all_days = {}
+    if state.get("manual_enabled", True):
+        for path in sorted(glob.glob(prefix + ".manual.*")):
+            all_days.update(json.loads(Path(path).read_text())["data"])
+    pnd_days = 0
     for path in sorted(glob.glob(prefix + ".history.*")):
         for day, item in json.loads(Path(path).read_text())["data"].items():
+            pnd_days += 1
+            manual = all_days.get(day)
+            if manual and item["tariffs"]["quality"] != "measured":
+                item = {**item, "tariffs": manual["tariffs"]}
             all_days[day] = item
-            row = months[day[:7]]
-            energy = sum(
-                (Decimal(str(v["kwh"])) for v in item["intervals"]), Decimal(0)
-            )
-            row["days"] += 1
-            row["kwh"] += energy
-            tariffs = item["tariffs"]
-            row["qualities"][tariffs["quality"]] += 1
-            if tariffs["quality"] == "measured":
-                row["paired_profile_kwh"] += energy
-                row["vt"] += Decimal(str(tariffs["vt"]))
-                row["nt"] += Decimal(str(tariffs["nt"]))
-    for month, row in months.items():
-        if "2026-10" <= month <= "2026-12":
-            year, number = map(int, month.split("-"))
-            # Independent check against the user-supplied default price period.
-            fixed = Decimal(842) * row["days"] / monthrange(year, number)[1]
-            row["expected_priced_costs"] = {
-                "vt": row["vt"] * Decimal("4.19544"),
-                "nt": row["nt"] * Decimal("3.42314"),
-                "fixed": fixed,
-                "total": row["vt"] * Decimal("4.19544")
-                + row["nt"] * Decimal("3.42314")
-                + fixed,
-                "valid_for_all_days": row["qualities"]["measured"] == row["days"],
-            }
+    prices = []
+    entries_file = Path(root) / "core.config_entries"
+    if entries_file.exists():
+        for entry in json.loads(entries_file.read_text())["data"]["entries"]:
+            if entry["domain"] == "cez_pnd":
+                prices = entry.get("options", {}).get("prices", [])
+    for day, item in sorted(all_days.items()):
+        row = months[day[:7]]
+        energy = (
+            sum((Decimal(str(v["kwh"])) for v in item["intervals"]), Decimal(0))
+            if item["intervals"]
+            else Decimal(item["daily_kwh"])
+        )
+        row["days"] += 1
+        row["kwh"] += energy
+        tariffs = item["tariffs"]
+        row["qualities"][tariffs["quality"]] += 1
+        if tariffs["quality"] in ("measured", "estimated_daily"):
+            row["paired_profile_kwh"] += energy
+            row["vt"] += Decimal(str(tariffs["vt"]))
+            row["nt"] += Decimal(str(tariffs["nt"]))
+            price = next((p for p in prices if p["from"] <= day < p["until"]), None)
+            if price:
+                charges = row.setdefault(
+                    "expected_priced_costs",
+                    {
+                        "vt": Decimal(0),
+                        "nt": Decimal(0),
+                        "fixed": Decimal(0),
+                        "total": Decimal(0),
+                        "priced_days": 0,
+                    },
+                )
+                vt = Decimal(tariffs["vt"]) * Decimal(price["vt"])
+                nt = Decimal(tariffs["nt"]) * Decimal(price["nt"])
+                year, month, _ = map(int, day.split("-"))
+                fixed = Decimal(price["fixed"]) / monthrange(year, month)[1]
+                charges["vt"] += vt
+                charges["nt"] += nt
+                charges["fixed"] += fixed
+                charges["total"] += vt + nt + fixed
+                charges["priced_days"] += 1
     pending = state.get("pending", {})
     cursor = pending.get("cursor", 0)
     dates = pending.get("dates", [])
@@ -63,6 +87,9 @@ def audit(root="/config/.storage"):
         "enabled": state.get("enabled"),
         "last_success": state.get("last_success"),
         "archived_days": len(all_days),
+        "pnd_profile_days": pnd_days,
+        "estimated_days": len(state.get("estimated_days", [])),
+        "unpriced_days": len(state.get("unpriced_days", [])),
         "first": min(all_days, default=None),
         "last": max(all_days, default=None),
         "pending": {

@@ -1,5 +1,9 @@
 # Audit implementace a nasazení – 9. listopadu 2026
 
+**Nejnovější stav 0.6.0:** následně byla importována ruční historie 2025–2026.
+Aktuální výsledky, omezení odhadů a odstranění uživatelem potvrzených duplicit
+jsou v [reportu ručních odečtů](MANUAL-HISTORY.md). Níže jsou starší etapy migrace.
+
 **Následná aktualizace:** po původním níže popsaném nasazení 0.5.1 uživatel
 poskytl fakturu. Nativní komponenta je nyní **0.5.2**, transportní aplikace
 zůstává 0.5.1. Historické ceny 18. 9. 2025–30. 9. 2026 jsou uložené přes

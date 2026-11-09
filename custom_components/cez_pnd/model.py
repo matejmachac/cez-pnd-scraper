@@ -170,7 +170,7 @@ def fixed_hourly(day, price):
 
 
 def daily_cost(tariffs, price):
-    if tariffs["quality"] != "measured" or not price:
+    if tariffs["quality"] not in ("measured", "estimated_daily") or not price:
         return None
     return {
         key: Decimal(tariffs[key]) * Decimal(str(price[key])) for key in ("vt", "nt")

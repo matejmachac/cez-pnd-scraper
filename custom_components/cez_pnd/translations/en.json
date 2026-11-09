@@ -94,6 +94,10 @@
           }
         }
       }
+    },
+    "manual_data": {
+      "title": "Manual readings conflict with PND",
+      "description": "Measured PND data was preserved. Conflicting manual intervals were excluded. Intervals: {detail}."
     }
   }
 }

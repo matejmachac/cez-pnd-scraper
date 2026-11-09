@@ -59,3 +59,25 @@ resume:
       selector:
         config_entry:
           integration: cez_pnd
+
+import_manual_history:
+  name: Importovat historii ručních odečtů
+  description: Rozpočítá rozdíly registrů do dní jako odhad. Zachová měření PND a přepočte navazující statistiky.
+  fields:
+    entry_id:
+      selector:
+        config_entry:
+          integration: cez_pnd
+    file:
+      required: true
+      description: Cesta k připravenému JSON souboru uvnitř konfigurace Home Assistantu.
+      selector:
+        text:
+disable_manual_history:
+  name: Vypnout ruční odhady
+  description: Zachová zdrojové odečty, přepočte statistiky zpět na PND a zachová naměřenou historii.
+  fields:
+    entry_id:
+      selector:
+        config_entry:
+          integration: cez_pnd

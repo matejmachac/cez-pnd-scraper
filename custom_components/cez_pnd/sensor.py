@@ -133,14 +133,13 @@ class PndSensor(CoordinatorEntity, SensorEntity):
         data = self.coordinator.data or {}
         description = self.entity_description
         if description.kind == "total":
-            if (
-                description.key in ("import_vt", "import_nt")
-                and data.get("tariff_quality") != "daily_measured"
-            ):
+            if description.key in ("import_vt", "import_nt") and data.get(
+                "tariff_quality"
+            ) not in ("daily_measured", "daily_measured_and_estimated"):
                 return None
-            if (
-                description.key == "cost_total"
-                and data.get("cost_quality") != "daily_settlement"
+            if description.key == "cost_total" and data.get("cost_quality") not in (
+                "daily_settlement",
+                "daily_settlement_with_estimates",
             ):
                 return None
             return data.get("totals", {}).get(description.key)
@@ -166,6 +165,13 @@ class PndSensor(CoordinatorEntity, SensorEntity):
                 "resolution": "hour" if key == "import_total" else "day",
                 "source": "ČEZ PND",
                 "delayed_measurements": True,
+                "estimated_days": len(
+                    (self.coordinator.data or {}).get("estimated_days", [])
+                ),
+                "estimate_method": "Equal calendar days between readings, preserving PND measurements",
+                "estimated_date_range": {"from": min(days), "until": max(days)}
+                if (days := (self.coordinator.data or {}).get("estimated_days", []))
+                else None,
             }
             if key in ("import_vt", "import_nt"):
                 attributes["unpaired_measured_days"] = len(

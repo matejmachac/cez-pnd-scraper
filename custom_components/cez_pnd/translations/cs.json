@@ -94,6 +94,10 @@
           }
         }
       }
+    },
+    "manual_data": {
+      "title": "Ruční odečty nesouhlasí s PND",
+      "description": "Naměřená data PND jsou zachována. Rozporné intervaly ručních odečtů se nepoužily. Počet: {detail}."
     }
   }
 }

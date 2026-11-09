@@ -5,7 +5,7 @@ async def async_get_config_entry_diagnostics(hass, entry):
     coordinator = entry.runtime_data
     state = coordinator.archive.state
     return {
-        "integration_version": "0.5.2",
+        "integration_version": "0.6.0",
         "protocol": 1,
         "writer": "native",
         "status": state.get("status"),
@@ -13,6 +13,8 @@ async def async_get_config_entry_diagnostics(hass, entry):
         "incomplete_priced_days": len(state.get("incomplete_cost_days", [])),
         "unpriced_measured_days": len(state.get("unpriced_days", [])),
         "unpaired_measured_days": len(state.get("unpaired_tariff_days", [])),
+        "estimated_days": len(state.get("estimated_days", [])),
+        "manual_conflicts": len(state.get("manual_conflicts", [])),
         "archived_days": len(state.get("days", [])),
         "unavailable_days": len(state.get("unavailable_days", [])),
         "missing_days": len(state.get("missing_days", [])),

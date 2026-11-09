@@ -44,14 +44,17 @@ class StatisticsWriter:
             result[stat_id] = Decimal(str(prior[-1]["sum"])) if prior else Decimal(0)
         return result
 
-    async def write(self, statistic_id, increments, baseline, *, cost=False):
+    async def write(
+        self, statistic_id, increments, baseline, *, cost=False, estimated=False
+    ):
         if not increments:
             return baseline
         rows = cumulative_rows(increments, baseline)
         metadata = {
             "has_sum": True,
             "mean_type": StatisticMeanType.NONE,
-            "name": f"ČEZ PND {statistic_id.split(':')[1]}",
+            "name": f"ČEZ PND {statistic_id.split(':')[1]}"
+            + (" (včetně denních odhadů)" if estimated else ""),
             "source": "cez_pnd",
             "statistic_id": statistic_id,
             "unit_class": None if cost else "energy",

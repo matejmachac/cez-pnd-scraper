@@ -34,3 +34,5 @@ uv pip install --python .venv/bin/python -r requirements-test.txt
 ```
 
 Historické ceny a produkční ověření nativní verze 0.5.2: [doplnění podle faktury](docs/HISTORICAL-PRICES.md).
+
+Nativní verze 0.6.0 doplňuje [import ručních odečtů z XLSX a označené denní odhady](docs/MANUAL-HISTORY.md), které respektují přednost naměřených PND dat.
