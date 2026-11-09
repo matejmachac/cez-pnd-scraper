@@ -51,3 +51,11 @@ export_history:
     end:
       selector:
         date:
+resume:
+  name: Obnovit nativní import
+  description: Obnoví import po rollbacku, pouze pokud je aplikace opět v režimu native.
+  fields:
+    entry_id:
+      selector:
+        config_entry:
+          integration: cez_pnd

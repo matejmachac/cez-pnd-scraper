@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import time
 import urllib.error
 import urllib.request
 from zoneinfo import ZoneInfo
@@ -52,10 +53,8 @@ def api(path, data=None, *, method=None, token=None, base="http://supervisor"):
 
 
 def transport_url(info):
-    """Use Supervisor-registered DNS, not the Docker container hostname."""
-    names = info.get("dns") or []
-    host = names[0] if names else info["hostname"] + ".local.hass.io"
-    return "http://" + host + ":8099"
+    """Probe the authoritative current app address; do not persist its IP."""
+    return "http://" + info["ip_address"] + ":8099"
 
 
 def app_info(slug):
@@ -94,7 +93,16 @@ def main(args):
         api(f"/addons/{args.app}/restart", {})
         current = app_info(args.app)
         url = transport_url(current)
-        transport = api("/v1/info", base=url, token=token)
+        for attempt in range(30):
+            try:
+                transport = api("/v1/info", base=url, token=token)
+                break
+            except urllib.error.URLError:
+                if attempt == 29:
+                    raise RuntimeError(
+                        "The native transport did not become ready"
+                    ) from None
+                time.sleep(1)
         if transport.get("writerMode") != "native":
             raise RuntimeError("The legacy writer has not stopped")
         today = datetime.now(ZoneInfo("Europe/Prague")).date()
@@ -105,7 +113,7 @@ def main(args):
         save(
             "entry-input.json",
             {
-                "url": url,
+                "url": "supervisor://" + args.app,
                 "token": token,
                 "supply_point": args.supply_point,
                 "statistic_id": transport.get("statisticId") or "",

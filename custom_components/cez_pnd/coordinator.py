@@ -109,6 +109,8 @@ class PndCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data({**state, "statistic_ids": self.ids})
 
     def start(self, start=None, end=None, *, refresh=True):
+        if not self.archive.state.get("enabled", True) or self.closed:
+            raise HomeAssistantError("The native PND import is disabled")
         if self.task and not self.task.done():
             raise HomeAssistantError("PND synchronization is already running")
         self.task = self.entry.async_create_background_task(
@@ -349,6 +351,11 @@ class PndCoordinator(DataUpdateCoordinator):
     async def publish(self, start, end):
         """Replay later cumulative sums in bounded, verified Recorder batches."""
         state = self.archive.state
+        if not state.get("enabled", True) or self.closed:
+            raise HomeAssistantError("The native PND import is disabled")
+        await (
+            self.api.info()
+        )  # Recheck ownership even when measurements came from cache.
         baselines = await self.writer.baselines(self.ids.values(), boundary(start))
         increments = {key: {} for key in self.ids}
         cost_ready = False
@@ -456,3 +463,11 @@ class PndCoordinator(DataUpdateCoordinator):
         await self.shutdown()
         await self.energy.rollback()
         self._notify("disabled")
+
+    async def resume(self):
+        await self.api.info()  # Never resume while the legacy writer is active.
+        self.archive.state["enabled"] = True
+        self.closed = False
+        await self.archive.save()
+        self._notify("idle")
+        self.start()

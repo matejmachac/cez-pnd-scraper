@@ -1,6 +1,9 @@
 """Authenticated connection to the existing Playwright transport app."""
 
 import asyncio
+import ipaddress
+import os
+import re
 import aiohttp
 
 
@@ -22,10 +25,36 @@ class PndTransport:
         self.url = url.rstrip("/")
         self.token = token
 
+    async def _base_url(self):
+        if not self.url.startswith("supervisor://"):
+            return self.url
+        match = re.fullmatch(r"supervisor://([a-z0-9_]+)", self.url)
+        supervisor_token = os.environ.get("SUPERVISOR_TOKEN")
+        if match is None or not supervisor_token:
+            raise TransportError("Supervisor application discovery requires HAOS")
+        host = os.environ.get("SUPERVISOR", "supervisor")
+        async with self.session.get(
+            f"http://{host}/addons/{match[1]}/info",
+            headers={"Authorization": f"Bearer {supervisor_token}"},
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as response:
+            if response.status != 200:
+                raise TransportError("Supervisor application discovery failed")
+            info = await response.json()
+        try:
+            address = ipaddress.ip_address(info["data"]["ip_address"])
+        except (KeyError, ValueError, TypeError) as err:
+            raise TransportError(
+                "Supervisor returned no usable transport address"
+            ) from err
+        target = str(address) if address.version == 4 else f"[{address}]"
+        return f"http://{target}:8099"
+
     async def get(self, path, **params):
         try:
+            base = await self._base_url()
             async with self.session.get(
-                f"{self.url}/v1/{path}",
+                f"{base}/v1/{path}",
                 params=params,
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=aiohttp.ClientTimeout(total=240),

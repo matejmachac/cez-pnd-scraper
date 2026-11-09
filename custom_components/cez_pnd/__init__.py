@@ -118,6 +118,9 @@ def _register_services(hass):
     async def rollback(call):
         await coordinator_for(call).rollback()
 
+    async def resume(call):
+        await coordinator_for(call).resume()
+
     async def export_history(call):
         coordinator = coordinator_for(call)
         start, end = period(call, coordinator)
@@ -130,6 +133,9 @@ def _register_services(hass):
     hass.services.async_register(DOMAIN, "recalculate_costs", reprice, schema=schema)
     hass.services.async_register(
         DOMAIN, "rollback", rollback, schema=vol.Schema({vol.Optional("entry_id"): str})
+    )
+    hass.services.async_register(
+        DOMAIN, "resume", resume, schema=vol.Schema({vol.Optional("entry_id"): str})
     )
     hass.services.async_register(
         DOMAIN,
