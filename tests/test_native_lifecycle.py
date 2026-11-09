@@ -523,3 +523,35 @@ async def test_recent_priced_correction_keeps_older_unknown_price_warning(
     state = hass.states.get("sensor.cez_pnd_unknown_price_naklady_na_elektrinu")
     assert state.attributes["unpriced_measured_days"] == 1
     assert state.attributes["price_periods"][0]["from"] == "2026-11-08"
+
+
+@pytest.mark.asyncio
+async def test_historical_price_period_gap_keeps_complete_current_cost_source(
+    hass, monkeypatch
+):
+    from custom_components.cez_pnd.api import IncompleteMeasurement
+    from custom_components.cez_pnd.const import DEFAULT_PRICES
+
+    entry, _ = await simple_entry(hass, monkeypatch, "historic_gap")
+    coordinator = entry.runtime_data
+    prices = [
+        {**DEFAULT_PRICES[0], "until": "2026-11-08"},
+        {**DEFAULT_PRICES[0], "from": "2026-11-08", "version": "current"},
+    ]
+    monkeypatch.setattr(PndCoordinator, "prices", property(lambda self: prices))
+    original = coordinator._profile
+
+    async def missing(day):
+        if day == "2026-11-07":
+            raise IncompleteMeasurement("Historical gap")
+        return await original(day)
+
+    monkeypatch.setattr(coordinator, "_profile", missing)
+    await coordinator.synchronize("2026-11-07", "2026-11-08")
+    assert coordinator.data["cost_quality"] == "daily_settlement"
+    assert coordinator.data["incomplete_cost_days"] == ["2026-11-07"]
+    # The older gap remains explicit without invalidating a later price period.
+    manager = await async_get_manager(hass)
+    assert (
+        manager.data["energy_sources"][0]["stat_cost"] == coordinator.ids["cost_total"]
+    )

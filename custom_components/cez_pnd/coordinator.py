@@ -446,12 +446,26 @@ class PndCoordinator(DataUpdateCoordinator):
         state["tariff_quality"] = (
             "daily_measured" if not unknown_tariffs else "incomplete"
         )
+        # Cost attachment follows the latest completed price period. A gap in
+        # an older price period must not hide a fully measured current period.
+        coverage_end = max([end, *state.get("days", [])])
+        current_price = price_for_day(coverage_end, self.prices)
+        coverage_start = min([start, *state.get("days", [])])
+        incomplete_cost_days = []
+        for day in self._dates(coverage_start, coverage_end):
+            if price_for_day(day, self.prices):
+                item = await self.archive.get(day)
+                if item is None or item["tariffs"]["quality"] != "measured":
+                    incomplete_cost_days.append(day)
+        state["incomplete_cost_days"] = incomplete_cost_days
+        active_gaps = [
+            day
+            for day in incomplete_cost_days
+            if current_price and day >= current_price["from"]
+        ]
         state["cost_quality"] = (
             "daily_settlement"
-            if cost_ready
-            and not unknown_cost_days
-            and last_profile
-            and price_for_day(last_profile, self.prices)
+            if current_price and cost_ready and not active_gaps
             else "incomplete"
         )
         # Repairs describe the entire retained history, not only the latest
@@ -479,7 +493,7 @@ class PndCoordinator(DataUpdateCoordinator):
                 await self.energy.configure(
                     self.ids["import_total"],
                     self.ids["cost_total"]
-                    if cost_ready and not unknown_cost_days
+                    if state["cost_quality"] == "daily_settlement"
                     else None,
                     replace_source=self.entry.options.get("replace_source"),
                 )

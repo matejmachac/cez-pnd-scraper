@@ -175,6 +175,9 @@ class PndSensor(CoordinatorEntity, SensorEntity):
                 attributes["unpriced_measured_days"] = len(
                     (self.coordinator.data or {}).get("unpriced_days", [])
                 )
+                attributes["incomplete_priced_days"] = len(
+                    (self.coordinator.data or {}).get("incomplete_cost_days", [])
+                )
                 attributes["price_periods"] = [
                     {"from": price["from"], "until": price["until"]}
                     for price in self.coordinator.prices

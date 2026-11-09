@@ -61,6 +61,8 @@ měsíci a potom podle 23/24/25 hodin dne. Celý měsíc se sazbou 842 Kč dáv�
 
 Potvrzený výchozí ceník pokrývá konzervativně pouze 1. 10.–31. 12. 2026.
 Pro rok 2025 ani pro neznámé regulované ceny 2027 se nic nepředpokládá.
+V tomto nasazení už byly navíc přes Options Flow doplněny potvrzené historické
+intervaly z uživatelem poskytnuté faktury; viz [Historický ceník](HISTORICAL-PRICES.md).
 Chybějící tarif nebo ceník se nevydává za nulové náklady; vyvolá Repairs a senzor
 kvality. Ceníky lze upravit v nativním Options Flow, včetně intervalů platnosti,
 a samostatnou akcí vědomě přepočítat historické období.
@@ -143,3 +145,11 @@ všechny uložené dny bez ceníku, i když poslední opravený den již ceník 
 Atributy senzoru nákladů obsahují `unpriced_measured_days` a `price_periods`;
 tarifní součty obsahují `unpaired_measured_days`. Tím lze rozlišit úplné oceněné
 období od neoceněné či nespárované starší historie.
+
+
+Od nativní verze 0.5.2 příslušnost celkových nákladů k Energy ověřuje úplnost
+nejnovější cenové periody. Neúplný srpen proto neskryje úplné říjnové a
+listopadové náklady. Atribut `incomplete_priced_days` uvádí historické dny s
+platnou cenou, ale neúplným měřením nebo tarifem; historická část nákladů může
+být jen známým mezisoučtem. Akce přepočtu přehrává všechny navazující kumulativní
+sumy, takže samotná změna ceny nemění kWh ani nevytváří duplicity.

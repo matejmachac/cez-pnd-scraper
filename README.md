@@ -32,3 +32,5 @@ uv venv --python 3.14 .venv
 uv pip install --python .venv/bin/python -r requirements-test.txt
 .venv/bin/python -m pytest tests
 ```
+
+Historické ceny a produkční ověření nativní verze 0.5.2: [doplnění podle faktury](docs/HISTORICAL-PRICES.md).

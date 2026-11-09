@@ -1,5 +1,22 @@
 # Audit implementace a nasazení – 9. listopadu 2026
 
+**Následná aktualizace:** po původním níže popsaném nasazení 0.5.1 uživatel
+poskytl fakturu. Nativní komponenta je nyní **0.5.2**, transportní aplikace
+zůstává 0.5.1. Historické ceny 18. 9. 2025–30. 9. 2026 jsou uložené přes
+Options Flow a archiv byl přepočten bez nového odhadu spotřeby. Aktuální
+odvození a omezení jsou v [Historickém ceníku](HISTORICAL-PRICES.md).
+
+Aktuální stav: `idle`, 97 uložených dnů, 1370,54325 kWh beze změny,
+0 naměřených dnů bez ceníku a 5 dnů v cenově pokrytém rozsahu s neúplným
+měřením/tarifem. Známá nákladová část od 31. 7. je 7531,7758475559 Kč;
+není to kompletní faktura ani úplné historické měsíce. Srpen v Energy
+2302,08 Kč, září 1873,26 Kč, říjen a listopad zůstaly 2343,41 / 985,86 Kč.
+Po aktualizaci prošlo **28 HA testů** včetně nové ochrany současných nákladů
+při mezeře v jiné starší cenové periodě. Všechny čtyři cenové intervaly byly
+načteny zpět z produkčního nastavení, ceny a částky vizuálně ověřeny v Energy.
+
+Následující oddíly zachycují stav a postup původního nasazení před fakturou.
+
 ## Výchozí řešení
 
 Repozitář původně obsahoval HAOS aplikaci 0.4.1, nikoli HA Custom Integration.
