@@ -32,3 +32,12 @@ configuration:
   log_level:
     name: Log level
     description: Verbosity of app logs.
+  correction_days:
+    name: Measurement correction window
+    description: Number of already imported days to check daily for corrected PND measurements (0–90).
+  writer_mode:
+    name: Statistics writer
+    description: Legacy keeps standalone operation. Native disables the old scheduler and gives the HA integration sole Recorder ownership.
+  bridge_token:
+    name: Native transport token
+    description: Private token connecting the native integration. This is not the PND password.

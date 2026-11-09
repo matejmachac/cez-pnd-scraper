@@ -1,0 +1,12 @@
+{
+  "domain": "cez_pnd",
+  "name": "ČEZ PND",
+  "version": "0.5.0",
+  "config_flow": true,
+  "documentation": "https://github.com/matejmachac/cez-pnd-scraper",
+  "issue_tracker": "https://github.com/matejmachac/cez-pnd-scraper/issues",
+  "codeowners": ["@matejmachac"],
+  "dependencies": ["recorder", "energy"],
+  "iot_class": "cloud_polling",
+  "requirements": []
+}

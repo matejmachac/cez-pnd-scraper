@@ -1,54 +1,34 @@
-# ČEZ PND Scraper
+# ČEZ PND → Home Assistant Energy
 
-Private Home Assistant OS app (add-on) that imports delayed 15-minute ČEZ
-Distribuce PND consumption into Home Assistant's long-term energy statistics.
+The existing Playwright scraper remains the PND login and export transport.
+Version 0.5 adds a native Home Assistant integration with Config/Options Flow,
+entities, versioned pricing, resumable history, verified external Recorder
+statistics, and automatic native Energy configuration with rollback.
 
-The app reads completed daily CSV exports with headless Playwright, validates
-all expected intervals, converts `kW` samples to hourly `kWh`, and imports them
-with their historical timestamps through the Supervisor-proxied Home Assistant
-WebSocket API. MQTT and an external server are not needed.
+The HAOS app still supports its original standalone `legacy` mode. In `native`
+mode its old scheduler is disabled: the native integration is the sole statistics
+writer. No MQTT, helpers, utility meters, or user-written YAML are required.
 
-Missed days after the last successful import are caught up automatically.
-Set `backfill_from: "2026-10-26"` to repair an older gap, including when newer
-days have already been imported. The app replays the whole range through
-yesterday so cumulative energy totals remain consistent.
+Measured total energy comes from quarter-hour profiles. Actual VT/NT registry
+exports provide daily tariff totals; the integration does not invent hourly
+tariff measurements. One grid source avoids counting total and tariff energy
+twice. Daily variable costs and independent hourly fixed charges feed an external
+CZK cost statistic. Unknown historical tariffs or prices remain explicitly unknown.
 
-After the first import, the app can also add its external statistic to the
-Energy dashboard automatically without replacing existing sources. This is
-enabled by default and targets the unified grid schema in HA 2026.6 and newer.
-
-Only a lightweight Node.js scheduler stays alive. Chromium starts for each day
-in an import attempt and is closed immediately afterward. Incomplete ranges
-are retried without modifying Home Assistant. PND credentials and browser state
-live only in the app's private `/data` volume.
-
-The app is in [`cez-pnd-scraper/`](./cez-pnd-scraper/). Installation,
-configuration, validation rules, and Energy dashboard setup are documented in
-[`DOCS.md`](./cez-pnd-scraper/DOCS.md).
+See [native adapter documentation](docs/NATIVE-ADAPTER.md) for architecture,
+installation, price validity, data resolution, migration, and rollback. The
+[original app documentation](cez-pnd-scraper/DOCS.md) describes standalone mode.
+[Audit notes](docs/IMPLEMENTATION-AUDIT.md) record the original installation and
+observed PND exports; they include the earlier, pre-native implementation stage.
 
 ## Development
 
-```bash
-cd cez-pnd-scraper
-npm ci
-npm test
-npm run check
-```
-
-Run the optional real-Chromium regression tests for portal loading, login, and
-end-to-end historical backfill against synthetic PND and Home Assistant servers:
-
-```bash
-npx playwright install chromium
-npm run test:browser
-```
-
-Build the same image that HAOS builds:
-
-```bash
-docker build \
-  --build-arg BUILD_VERSION=0.4.1 \
-  --build-arg BUILD_ARCH=amd64 \
-  -t cez-pnd-scraper:dev \
-  cez-pnd-scraper
+```sh
+npm --prefix cez-pnd-scraper ci
+npm --prefix cez-pnd-scraper test
+npm --prefix cez-pnd-scraper run check
+npm --prefix cez-pnd-scraper run test:browser
+uv venv --python 3.14 .venv
+uv pip install --python .venv/bin/python -r requirements-test.txt
+.venv/bin/python -m pytest tests
 ```

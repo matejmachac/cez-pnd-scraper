@@ -1,3 +1,12 @@
+# 0.5.0
+
+- Add native HA Core 2026.11 integration, configuration/options/reauth flows and diagnostic entities.
+- Keep existing CAS/Playwright login and standalone operation; native transport mode disables the legacy writer.
+- Add authenticated monthly profile and daily tariff-register exports, resumable versioned measurement archives and verified Recorder batches.
+- Import authoritative daily VT/NT snapshots, versioned daily variable costs and exact hourly fixed charges without estimated tariff curves.
+- Configure one native grid source, preserve existing history and foreign sources, provide explicit migration and rollback.
+- Add real HA Recorder/Energy lifecycle tests and a Chromium monthly-export regression.
+
 # Changelog
 
 ## 0.4.1

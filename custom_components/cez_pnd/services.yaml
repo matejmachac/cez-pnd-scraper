@@ -1,0 +1,53 @@
+backfill:
+  name: Doplnit nebo opravit historii PND
+  description: Znovu načte zvolené dokončené dny a přepočte i všechny navazující uložené statistiky.
+  fields:
+    entry_id:
+      selector:
+        config_entry:
+          integration: cez_pnd
+    start:
+      required: true
+      selector:
+        date:
+    end:
+      selector:
+        date:
+recalculate_costs:
+  name: Přepočítat historické náklady
+  description: Přepočte uloženou historii podle nastavených verzovaných ceníků bez opětovného stahování PND.
+  fields:
+    entry_id:
+      selector:
+        config_entry:
+          integration: cez_pnd
+    start:
+      required: true
+      selector:
+        date:
+    end:
+      selector:
+        date:
+rollback:
+  name: Obnovit původní Energy konfiguraci
+  description: Zastaví nový import a obnoví vlastněný zdroj Energy. Zachová statistiky i cizí konfiguraci.
+  fields:
+    entry_id:
+      selector:
+        config_entry:
+          integration: cez_pnd
+export_history:
+  name: Exportovat historii PND
+  description: Vrátí normalizovaná měření pro zálohu nebo migraci. Výstup obsahuje identifikátory měřičů.
+  fields:
+    entry_id:
+      selector:
+        config_entry:
+          integration: cez_pnd
+    start:
+      required: true
+      selector:
+        date:
+    end:
+      selector:
+        date:

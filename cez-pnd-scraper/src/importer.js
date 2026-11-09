@@ -7,6 +7,8 @@ export function buildHourlyStatistics(profile, {
   baseSum = 0,
 } = {}) {
   const dayStart = DateTime.fromISO(profile.targetDate, { zone: timezone }).startOf("day");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(profile.targetDate) || !dayStart.isValid || dayStart.toISODate() !== profile.targetDate ||
+      !Number.isFinite(Number(baseSum)) || Number(baseSum) < 0) throw new Error("Invalid statistics date or baseline");
   const dayEnd = dayStart.plus({ days: 1 });
   const expected = [];
   for (let cursor = dayStart.plus({ minutes: 15 }); cursor <= dayEnd; cursor = cursor.plus({ minutes: 15 })) {
@@ -14,6 +16,13 @@ export function buildHourlyStatistics(profile, {
   }
 
   const byEnd = new Map(profile.intervals.map((interval) => [interval.endMs, interval]));
+  if (byEnd.size !== profile.intervals.length) throw new Error("PND profile contains duplicate intervals");
+  const expectedSet = new Set(expected);
+  for (const interval of profile.intervals) {
+    if (!expectedSet.has(interval.endMs) || !Number.isFinite(interval.powerKw) || interval.powerKw < 0) {
+      throw new Error("PND profile contains an invalid interval or import power");
+    }
+  }
   const missing = expected.filter((timestamp) => !byEnd.has(timestamp));
   if (missing.length > 0) {
     const preview = missing.slice(0, 4).map((timestamp) =>

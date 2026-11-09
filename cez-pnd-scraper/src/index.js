@@ -8,14 +8,18 @@ import { createLogger } from "./logger.js";
 import { PndScraper } from "./scraper.js";
 import { delay, millisecondsUntilDailyWindow, nextDailyRun } from "./scheduler.js";
 import { StateStore } from "./state-store.js";
+import { HistoryStore } from "./history.js";
+import { createBridge } from "./bridge.js";
 
 const config = await loadConfig();
 const logger = createLogger(config.logLevel);
 const status = { running: false, stopping: false, lastSuccess: null, lastError: null };
-const healthServer = startHealthServer(config.healthPort, status);
 const abortController = new AbortController();
 const stateStore = new StateStore(path.join(config.dataDir, "state.json"));
 const scraper = new PndScraper(config, logger);
+const historyStore = new HistoryStore(path.join(config.dataDir, "history"), config.elm || "default", config.timezone);
+const healthServer = startHealthServer(config.healthPort, status,
+  config.writerMode === "native" ? createBridge({ config, stateStore, scraper, status }) : null);
 
 process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
@@ -28,7 +32,12 @@ logger.info("ČEZ PND delayed statistics importer started", {
 });
 
 let retrying = false;
-while (!status.stopping) {
+let failures = 0;
+if (config.writerMode === "native") {
+  logger.info("Native HA adapter owns statistics; legacy scheduler is disabled");
+  await new Promise((resolve) => abortController.signal.addEventListener("abort", resolve, { once: true }));
+}
+while (!status.stopping && config.writerMode === "legacy") {
   const windowWaitMs = millisecondsUntilDailyWindow(
     Date.now(),
     config.importHour,
@@ -48,6 +57,8 @@ while (!status.stopping) {
     await runImport({
       config,
       stateStore,
+      historyStore,
+      energyBackupStore: new StateStore(path.join(config.dataDir, "energy-backup.json")),
       scraper,
       logger,
       now: DateTime.now().setZone(config.timezone),
@@ -59,10 +70,12 @@ while (!status.stopping) {
       }),
     });
     retrying = false;
+    failures = 0;
     status.lastSuccess = new Date().toISOString();
     status.lastError = null;
   } catch (error) {
     retrying = true;
+    failures += 1;
     status.lastError = error.message;
     logger.error("Daily import failed; it will be retried", {
       error: error.message,
@@ -73,7 +86,7 @@ while (!status.stopping) {
   }
 
   const waitMs = retrying
-    ? config.retryMinutes * 60_000
+    ? Math.min(config.retryMinutes * 60_000 * 2 ** Math.min(failures - 1, 8), 6 * 3_600_000)
     : nextDailyRun(Date.now(), config.importHour, config.importMinute, config.timezone) - Date.now();
   logger.debug("Waiting for next import attempt", { seconds: Math.ceil(waitMs / 1_000), retrying });
   await delay(waitMs, abortController.signal).catch(() => {});

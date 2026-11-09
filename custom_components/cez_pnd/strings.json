@@ -1,0 +1,99 @@
+{
+  "title": "ČEZ PND",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Připojit transport ČEZ PND",
+        "description": "Stávající ČEZ aplikace musí používat režim native. Přihlášení do PND zůstává v ní.",
+        "data": {
+          "url": "Adresa transportu",
+          "token": "Přístupový token transportu",
+          "supply_point": "Stálý identifikátor odběrného místa",
+          "statistic_id": "Existující statistika celkového odběru (volitelné)",
+          "history_start": "Začátek historie (YYYY-MM-DD)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Obnovit spojení s PND",
+        "description": "Při odmítnutí přihlášení ČEZ opravte přihlašovací údaje ve stávající aplikaci PND. Zde lze aktualizovat přístupový token transportu.",
+        "data": {
+          "url": "Adresa transportu",
+          "token": "Přístupový token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Transport není dostupný nebo stále používá původní zapisovač statistik.",
+      "invalid_auth": "Ověření transportu nebo PND bylo odmítnuto.",
+      "invalid_configuration": "Zkontrolujte identifikátor statistiky a datum historie."
+    },
+    "abort": {
+      "already_configured": "Toto odběrné místo již je nastaveno.",
+      "reauth_successful": "Spojení bylo obnoveno."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Historie a ceníky",
+        "description": "Ceny jsou včetně DPH. Změnu ceníku potvrďte přepínačem. Pro historickou opravu následně spusťte akci Přepočítat historické náklady.",
+        "data": {
+          "history_start": "Začátek historie",
+          "correction_days": "Denní kontrola minulých dní",
+          "update_price": "Uložit změnu ceníku",
+          "price_from": "Platnost od (včetně)",
+          "price_until": "Platnost do (bez tohoto dne)",
+          "price_vt": "Cena VT (Kč/kWh)",
+          "price_nt": "Cena NT (Kč/kWh)",
+          "price_fixed": "Fixní platby (Kč/měsíc)",
+          "replace_source": "Výslovně nahradit tento starý grid zdroj (none = nic nenahrazovat)"
+        }
+      }
+    },
+    "error": {
+      "invalid_configuration": "Neplatné období nebo ceny."
+    }
+  },
+  "issues": {
+    "authentication": {
+      "title": "ČEZ PND – authentication",
+      "description": "Ověřte přihlašovací údaje ve stávající aplikaci PND a přístupový token integrace. Detail: {detail}."
+    },
+    "synchronization": {
+      "title": "ČEZ PND – synchronization",
+      "description": "PND je dočasně nedostupné nebo změnilo strukturu dat. Integrace opakuje pokus s rostoucím odstupem. Detail: {detail}."
+    },
+    "missing_measurements": {
+      "title": "ČEZ PND – missing_measurements",
+      "description": "Některé dny nemají úplné měřené údaje. Nuly se nedoplňují; chybějící dny budou znovu ověřeny. Počet: {detail}."
+    },
+    "tariff_data": {
+      "title": "ČEZ PND – tariff_data",
+      "description": "Chybí ověřené denní tarify nebo nesouhlasí součty registrů a profilu. Hodinové rozdělení se neodhaduje. Počet: {detail}."
+    },
+    "price_data": {
+      "title": "ČEZ PND – price_data",
+      "description": "Pro část historie není potvrzený ceník. Zadejte jej v nastavení integrace a spusťte přepočet nákladů. Počet: {detail}.",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Opravit nastavení ČEZ PND",
+            "description": "Pokračováním otevřete nativní nastavení integrace. Starý grid zdroj vybírejte k nahrazení pouze tehdy, pokud prokazatelně měří stejné odběrné místo. Pro změny historických cen poté spusťte akci přepočtu."
+          }
+        }
+      }
+    },
+    "energy_configuration": {
+      "title": "ČEZ PND – energy_configuration",
+      "description": "Automatická konfigurace Energy byla zastavena kvůli konfliktu nebo validační chybě. Stávající cizí zdroje zůstávají zachovány. Detail: {detail}.",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Opravit nastavení ČEZ PND",
+            "description": "Pokračováním otevřete nativní nastavení integrace. Starý grid zdroj vybírejte k nahrazení pouze tehdy, pokud prokazatelně měří stejné odběrné místo. Pro změny historických cen poté spusťte akci přepočtu."
+          }
+        }
+      }
+    }
+  }
+}

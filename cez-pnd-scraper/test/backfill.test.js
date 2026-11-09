@@ -191,3 +191,23 @@ test("clearing the explicit date rearms a later request for the same range", asy
   f.args.config.backfillFrom = "2026-11-03";
   assert.equal((await runImport(f.args)).days, 2);
 });
+
+test("rolling correction window replays later sums once per new day", () => {
+  const options = { ...config, correctionDays: 3 };
+  assert.deepEqual(planImportDates({ lastImportedDate: "2026-11-03", firstImportedDate: "2026-10-01" }, options, now),
+    ["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04"]);
+  assert.deepEqual(planImportDates({ lastImportedDate: "2026-11-04", lastCorrectionThrough: "2026-11-04" }, options, now), []);
+});
+
+test("concurrent syncs using the same store cannot both write statistics", async () => {
+  const f = fixture({ lastImportedDate: "2026-11-03" });
+  const scrape = f.args.scraper.scrapeDate;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  f.args.scraper.scrapeDate = async (date) => { await gate; return scrape(date); };
+  const first = runImport(f.args);
+  await assert.rejects(runImport(f.args), /already running/);
+  release();
+  await first;
+  assert.equal(f.imports(), 1);
+});

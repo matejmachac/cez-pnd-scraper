@@ -142,3 +142,21 @@ The most recent browser failure screenshot is stored as
 
 Do not delete `/data/state.json` or the Home Assistant statistic to repair a gap;
 use `backfill_from` instead.
+
+## Development changes awaiting deployment
+
+The working tree adds a private daily measurement archive under `/data/history`,
+restart checkpoints for data acquisition, and a rolling correction window
+(`correction_days`, default 7). A correction replays all later hours through
+yesterday to preserve cumulative sums. The first run after upgrading old state
+checks the last known day; subsequent runs grow the correction window within
+known history. Retry delays grow exponentially to a maximum of six hours.
+
+New Energy sources are backed up to `/data/energy-backup.json` before saving.
+An unidentified existing grid import blocks automatic addition to avoid double
+counting. A failed Energy validation removes the exact new addition. See
+[`IMPLEMENTATION-AUDIT.md`](../docs/IMPLEMENTATION-AUDIT.md) for rollback steps,
+verified production observations, and outstanding work. The new pricing module
+is tested independently and is **not yet connected to the statistics importer**.
+This version does not yet provide the requested native Config Flow or confirmed
+VT/NT history.

@@ -9,13 +9,19 @@ export function parseImportDate(value, timezone = "Europe/Prague") {
   return date;
 }
 
-export function planImportDates(state, { backfillFrom = "", timezone = "Europe/Prague" }, now) {
+export function planImportDates(state, { backfillFrom = "", timezone = "Europe/Prague", correctionDays = 0 }, now) {
   const yesterday = now.setZone(timezone).startOf("day").minus({ days: 1 });
   const last = state.lastImportedDate ? parseImportDate(state.lastImportedDate, timezone) : null;
   if (last && last > yesterday) throw new Error("Saved import date is ahead of yesterday; refusing to overwrite newer statistics");
   const requested = backfillFrom ? parseImportDate(backfillFrom, timezone) : null;
   if (requested && requested > yesterday) throw new Error("backfill_from must be yesterday or earlier");
   let start = last ? last.plus({ days: 1 }) : yesterday;
+  if (last && correctionDays > 0 && state.lastCorrectionThrough !== yesterday.toISODate()) {
+    let correctionStart = last.minus({ days: correctionDays - 1 });
+    const first = state.firstImportedDate ? parseImportDate(state.firstImportedDate, timezone) : last;
+    if (correctionStart < first) correctionStart = first;
+    if (correctionStart < start) start = correctionStart;
+  }
   if (requested && state.completedBackfillFrom !== backfillFrom && requested < start) start = requested;
   const dates = [];
   for (let day = start; day <= yesterday; day = day.plus({ days: 1 })) dates.push(day.toISODate());
@@ -24,7 +30,18 @@ export function planImportDates(state, { backfillFrom = "", timezone = "Europe/P
 
 // Prepare the entire replacement range before writing anything. Replaying only
 // the holes would leave later cumulative sums unchanged and create false drops.
-export async function runImport({ config, stateStore, scraper, createClient, logger, now, signal }) {
+const activeStores = new WeakSet();
+export async function runImport(args) {
+  if (activeStores.has(args.stateStore)) throw new Error("PND synchronization is already running");
+  activeStores.add(args.stateStore);
+  try {
+    return await runImportLocked(args);
+  } finally {
+    activeStores.delete(args.stateStore);
+  }
+}
+
+async function runImportLocked({ config, stateStore, historyStore, energyBackupStore, scraper, createClient, logger, now, signal }) {
   const state = await stateStore.load();
   const dates = planImportDates(state, config, now);
   if (dates.length === 0) {
@@ -36,13 +53,16 @@ export async function runImport({ config, stateStore, scraper, createClient, log
   }
   logger.info("Preparing PND import range", { from: dates[0], through: dates.at(-1), days: dates.length });
   const profiles = [];
+  await historyStore?.beginPlan(dates);
   let meterId;
   let statisticId;
   for (const targetDate of dates) {
     signal?.throwIfAborted();
-    const profile = await scraper.scrapeDate(targetDate, now);
+    const profile = await historyStore?.loadPendingProfile(targetDate) ?? await scraper.scrapeDate(targetDate, now);
     if (profile.targetDate !== targetDate) throw new Error(`PND returned a different day than requested: ${targetDate}`);
     buildHourlyStatistics(profile, { timezone: config.timezone });
+    await historyStore?.saveProfile(profile);
+    await historyStore?.checkpoint(targetDate);
     const id = config.statisticId || defaultStatisticId(profile.meterId);
     if (profiles.length && (meterId !== profile.meterId || statisticId !== id)) {
       throw new Error("PND meter changed within the backfill range; no statistics were imported");
@@ -76,7 +96,7 @@ export async function runImport({ config, stateStore, scraper, createClient, log
     let energyDashboardConfigured = state.energyDashboardConfigured ?? false;
     if (config.addToEnergyDashboard) {
       try {
-        const dashboard = await ensureEnergyDashboardSource(client, statisticId, `ČEZ PND ${meterId}`);
+        const dashboard = await ensureEnergyDashboardSource(client, statisticId, `ČEZ PND ${meterId}`, { backupStore: energyBackupStore });
         energyDashboardConfigured = true;
         if (dashboard.validationError) logger.warn("Energy dashboard validation failed", { error: dashboard.validationError });
       } catch (error) {
@@ -86,6 +106,7 @@ export async function runImport({ config, stateStore, scraper, createClient, log
     await stateStore.save({
       ...state,
       lastImportedDate: dates.at(-1),
+      firstImportedDate: state.firstImportedDate && state.firstImportedDate < dates[0] ? state.firstImportedDate : dates[0],
       statisticId,
       meterId,
       cumulativeSum,
@@ -93,7 +114,9 @@ export async function runImport({ config, stateStore, scraper, createClient, log
       lastDayEnergyKwh: lastBatch.energyKwh,
       energyDashboardConfigured,
       completedBackfillFrom: config.backfillFrom || null,
+      lastCorrectionThrough: dates.at(-1),
     });
+    await historyStore?.finishPlan();
     logger.info("Imported complete PND range into Home Assistant statistics", {
       from: dates[0], through: dates.at(-1), days: dates.length, hours: stats.length, statisticId,
     });

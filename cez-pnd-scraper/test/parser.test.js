@@ -71,3 +71,29 @@ test("parses PND CSV and excludes unknown placeholder values", () => {
     statusCounts: { "namerena data ok": 1, "neznama hodnota": 1 },
   });
 });
+
+test("rejects malformed numeric suffixes and nonexistent Prague times", () => {
+  assert.equal(parseCzechNumber("12 kWh"), null);
+  assert.equal(parseCzechNumber("1.2.3"), null);
+  assert.equal(parsePndTimestamp("29.03.2026 02:15:00"), null);
+  assert.equal(parsePndTimestamp("01.11.2026 24:15:00"), null);
+});
+
+test("native multi-meter profile preserves replacement segments and per-channel quality", async () => {
+  const { parsePndMultiMeterCsv } = await import('../src/parser.js');
+  const { syntheticCsv } = await import('./fixtures/pnd.js');
+  const { buildHourlyStatistics } = await import('../src/importer.js');
+  const original=syntheticCsv('2026-11-01').split('\n').slice(1);
+  const header='"Datum";"+A/old [kW]";"Status";"Datum";"+A/new [kW]";"Status"';
+  const rows=original.map((line,index)=> {
+    const stamp=line.split(';')[0];
+    return `${stamp};1;"${index<48?'naměřená data OK':'neplatná data'}";${stamp};2;"${index>=48?'naměřená data OK':'neplatná data'}"`;
+  });
+  const parsed=parsePndMultiMeterCsv([header,...rows].join('\n'),{targetDate:'2026-11-01',timezone:'Europe/Prague'});
+  assert.equal(parsed.intervals.length,96);
+  assert.equal(parsed.intervals[0].meterId,'old');
+  assert.equal(parsed.intervals.at(-1).meterId,'new');
+  assert.equal(buildHourlyStatistics(parsed).energyKwh,36);
+  const overlap=[header,...rows].join('\n').replaceAll('neplatná data','naměřená data OK');
+  assert.throws(()=>parsePndMultiMeterCsv(overlap,{targetDate:'2026-11-01'}),/Overlapping/);
+});

@@ -37,3 +37,15 @@ test("rejects a day with a missing interval but accepts zero power", () => {
   complete.intervals.splice(20, 1);
   assert.throws(() => buildHourlyStatistics(complete), IncompleteDayError);
 });
+
+test("duplicate, negative and nonfinite intervals never reach Recorder", () => {
+  for (const mutate of [
+    (profile) => profile.intervals.push(profile.intervals[0]),
+    (profile) => { profile.intervals[0].powerKw = -1; },
+    (profile) => { profile.intervals[0].powerKw = NaN; },
+  ]) {
+    const profile = completeProfile("2026-11-01");
+    mutate(profile);
+    assert.throws(() => buildHourlyStatistics(profile), /duplicate|invalid/);
+  }
+});

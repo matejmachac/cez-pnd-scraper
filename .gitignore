@@ -13,3 +13,7 @@ test-results/
 browser-state.json
 state.json
 last-error.png
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/

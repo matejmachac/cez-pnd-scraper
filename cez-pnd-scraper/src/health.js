@@ -1,7 +1,16 @@
 import http from "node:http";
 
-export function startHealthServer(port, status) {
-  const server = http.createServer((request, response) => {
+export function startHealthServer(port, status, bridge) {
+  const server = http.createServer(async (request, response) => {
+    if (bridge && request.url?.startsWith("/v1/")) {
+      try {
+        await bridge(request, response);
+      } catch {
+        if (!response.headersSent) response.writeHead(500, { "content-type": "application/json" }).end('{"error":"transport_failure"}');
+        else response.end();
+      }
+      return;
+    }
     if (request.url !== "/health") {
       response.writeHead(404).end();
       return;

@@ -2,8 +2,9 @@ import { access, chmod, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { DateTime } from "luxon";
 import { chromium } from "playwright";
-import { parsePndCsv } from "./parser.js";
+import { parsePndCsv, parsePndMultiMeterCsv } from "./parser.js";
 import { buildHourlyStatistics, IncompleteDayError } from "./importer.js";
+import { parseRegisterCsv } from "./registers.js";
 
 export class PndScraper {
   constructor(config, logger, browserType = chromium) {
@@ -18,7 +19,19 @@ export class PndScraper {
     return this.scrapeDate(now.minus({ days: 1 }).toISODate(), now);
   }
 
-  async scrapeDate(targetDate, now = DateTime.now().setZone(this.config.timezone)) {
+  async scrapeRegistersDate(targetDate, now = DateTime.now().setZone(this.config.timezone)) {
+    return this.scrapeDate(targetDate, now, { report: "daily_registers" });
+  }
+
+  async scrapeMonth(month, now = DateTime.now().setZone(this.config.timezone)) {
+    const first = DateTime.fromISO(`${month}-01`, { zone: this.config.timezone });
+    if (!/^\d{4}-\d{2}$/.test(month) || !first.isValid) throw new Error("Invalid month");
+    const from = first.minus({ days: 1 }); // Opening register for the month's first day.
+    const end = DateTime.min(first.plus({ months: 1 }), now.setZone(this.config.timezone).startOf("day"));
+    return this.scrapeDate(from.toISODate(), now, { rangeEnd: end.toISODate() });
+  }
+
+  async scrapeDate(targetDate, now = DateTime.now().setZone(this.config.timezone), { report = "profile", includeRegisters = false, rangeEnd = null } = {}) {
     const date = DateTime.fromISO(targetDate, { zone: this.config.timezone });
     if (!date.isValid || date.toISODate() !== targetDate || targetDate >= now.setZone(this.config.timezone).toISODate()) {
       throw new Error(`PND import date must be a completed calendar day: ${targetDate}`);
@@ -52,13 +65,62 @@ export class PndScraper {
           // evaluator. Keep all dashboard interaction on native DOM APIs instead of
           // selector-based Playwright calls.
           const intervalInputId = await this.findExportWindow(page);
-          if (targetDate === now.setZone(this.config.timezone).minus({ days: 1 }).toISODate()) {
+          if (!rangeEnd && targetDate === now.setZone(this.config.timezone).minus({ days: 1 }).toISODate()) {
             await this.selectYesterdayAndSearch(page, intervalInputId, targetDate);
           } else {
-            await this.selectHistoricalAndSearch(page, intervalInputId, targetDate);
+            await this.selectHistoricalAndSearch(page, intervalInputId, targetDate, rangeEnd);
+          }
+          if (this.config.writerMode === "native") {
+            await this.selectReport(page, intervalInputId, /^01\s+Profil spotřeby/);
+          }
+          if (report === "daily_registers") {
+            try {
+              await this.selectReport(page, intervalInputId, /^17\s+Registry za den/);
+              const csv = await this.downloadCsv(page, intervalInputId);
+              const samples = parseRegisterCsv(csv, { elm: this.config.elm, timezone: this.config.timezone, allowMultiple: this.config.writerMode === "native" });
+              const boundary = date.startOf("day").plus({ days: 1 }).toMillis();
+              if (samples.some((sample) => Date.parse(sample.timestamp) !== boundary)) throw new Error("PND registry export returned a different day than requested");
+              await context.storageState({ path: this.storageStatePath });
+              await chmod(this.storageStatePath, 0o600);
+              return samples;
+            } finally {
+              // Report selection is portal state; do not leave the working
+              // profile scraper pointing at registry columns on its next run.
+              await this.selectReport(page, intervalInputId, /^01\s+Profil spotřeby/);
+            }
           }
           const csv = await this.downloadCsv(page, intervalInputId);
-          const profile = parsePndCsv(csv, {
+          const parser = this.config.writerMode === "native" && !this.config.elm ? parsePndMultiMeterCsv : parsePndCsv;
+          if (rangeEnd) {
+            const end = DateTime.fromISO(rangeEnd, { zone: this.config.timezone });
+            if (!end.isValid || end <= date || end > now.setZone(this.config.timezone).startOf("day") || end.diff(date, "days").days > 32) throw new Error("Invalid measurement range");
+            const result = { from: targetDate, through: end.minus({ days: 1 }).toISODate(), profiles: {}, incomplete: [], registers: [] };
+            for (let day = date; day < end; day = day.plus({ days: 1 })) {
+              const target = day.toISODate();
+              const profile = parser(csv, { elm: this.config.elm, timezone: this.config.timezone, targetDate: target });
+              try {
+                buildHourlyStatistics(profile, { timezone: this.config.timezone });
+                result.profiles[target] = profile;
+              } catch (error) {
+                if (!(error instanceof IncompleteDayError)) throw error;
+                result.incomplete.push(target);
+              }
+            }
+            try {
+              await this.selectReport(page, intervalInputId, /^17\s+Registry za den/);
+              result.registers = parseRegisterCsv(await this.downloadCsv(page, intervalInputId), {
+                elm: this.config.elm, timezone: this.config.timezone, allowMultiple: true,
+              });
+              const fromMs = date.toMillis();
+              if (result.registers.some((sample) => Date.parse(sample.timestamp) <= fromMs || Date.parse(sample.timestamp) > end.toMillis())) throw new Error("PND registry export returned a different range");
+            } finally {
+              await this.selectReport(page, intervalInputId, /^01\s+Profil spotřeby/);
+            }
+            await context.storageState({ path: this.storageStatePath });
+            await chmod(this.storageStatePath, 0o600);
+            return result;
+          }
+          const profile = parser(csv, {
             elm: this.config.elm,
             timezone: this.config.timezone,
             targetDate,
@@ -77,6 +139,18 @@ export class PndScraper {
           }
           await context.storageState({ path: this.storageStatePath });
           await chmod(this.storageStatePath, 0o600);
+          if (includeRegisters) {
+            try {
+              await this.selectReport(page, intervalInputId, /^17\s+Registry za den/);
+              profile.registers = parseRegisterCsv(await this.downloadCsv(page, intervalInputId), {
+                elm: this.config.elm, timezone: this.config.timezone, allowMultiple: true,
+              });
+              const boundary = date.startOf("day").plus({ days: 1 }).toMillis();
+              if (profile.registers.some((sample) => Date.parse(sample.timestamp) !== boundary)) throw new Error("PND registry export returned a different day than requested");
+            } finally {
+              await this.selectReport(page, intervalInputId, /^01\s+Profil spotřeby/);
+            }
+          }
           return profile;
         } catch (error) {
           await page.screenshot({ path: this.errorScreenshotPath, fullPage: true }).catch(() => {});
@@ -151,16 +225,29 @@ export class PndScraper {
     if (isPndLoginErrorUrl(page.url())) throw new PndLoginRejectedError();
   }
 
+  async selectReport(page, intervalInputId, pattern) {
+    await waitForSearch(page, () => page.evaluate(({ id, source }) => {
+      const scope = document.getElementById(id)?.closest(".pnd-window");
+      const expression = new RegExp(source);
+      const report = [...(scope?.querySelectorAll("a") ?? [])]
+        .find((link) => expression.test(link.textContent.trim()));
+      if (!report) throw new Error("Requested PND report is unavailable");
+      report.click();
+    }, { id: intervalInputId, source: pattern.source }));
+  }
+
   async findExportWindow(page) {
-    const inputId = await pollForValue(page, async () => page.evaluate(() => {
-      for (const window of document.querySelectorAll(".pnd-window")) {
+    const inputId = await pollForValue(page, async () => page.evaluate(({ native }) => {
+      const windows = [...document.querySelectorAll(".pnd-window")];
+      if (native) windows.sort((a, b) => Number(b.innerText.includes("Všechny EANy")) - Number(a.innerText.includes("Všechny EANy")));
+      for (const window of windows) {
         const input = window.querySelector('input[id$="-intervalType"]');
         const search = [...window.querySelectorAll("button")]
           .find((button) => /\bvyhledat\s+data\b/i.test(button.textContent ?? ""));
         if (input?.id && search) return input.id;
       }
       return null;
-    }), 30_000);
+    }, { native: this.config.writerMode === "native" && !this.config.elm }), 30_000);
     if (!inputId) throw new Error("No PND data window with period and search controls was found");
     return inputId;
   }
@@ -192,12 +279,12 @@ export class PndScraper {
     await this.searchAndWait(page, intervalInputId, targetDate);
   }
 
-  async selectHistoricalAndSearch(page, intervalInputId, targetDate) {
+  async selectHistoricalAndSearch(page, intervalInputId, targetDate, rangeEnd = null) {
     const dayStart = DateTime.fromISO(targetDate, { zone: this.config.timezone });
     // PND searches timestamp boundaries, not inclusive date labels. Identical
     // midnight endpoints yield a header-only CSV. Use a calendar day (not 24
     // elapsed hours) so DST days include all 92/100 quarter-hour intervals.
-    const dayEnd = dayStart.plus({ days: 1 });
+    const dayEnd = rangeEnd ? DateTime.fromISO(rangeEnd, { zone: this.config.timezone }) : dayStart.plus({ days: 1 });
     const expected = dayStart.toFormat("dd.MM.yyyy");
     const expectedEnd = dayEnd.toFormat("dd.MM.yyyy");
     await page.evaluate(({ id }) => {

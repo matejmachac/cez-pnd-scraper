@@ -56,3 +56,45 @@ test("is idempotent and does not save an existing source", async () => {
   assert.equal(result.changed, false);
   assert.equal(saves, 0);
 });
+
+test("refuses an unidentified existing grid import before writing", async () => {
+  let saves = 0;
+  await assert.rejects(ensureEnergyDashboardSource({
+    getEnergyPreferences: async () => ({ energy_sources: [{ type: "grid", stat_energy_from: "sensor.old_pnd" }] }),
+    saveEnergySources: async () => { saves++; },
+  }, statisticId, "PND"), /migration mapping/);
+  assert.equal(saves, 0);
+});
+
+test("backs up before saving and rolls back on validation errors", async () => {
+  let sources = [{ type: "solar", stat_energy_from: "sensor.pv" }];
+  let backup;
+  const original = structuredClone(sources);
+  const client = {
+    getEnergyPreferences: async () => ({ energy_sources: sources, device_consumption: [] }),
+    saveEnergySources: async (next) => { assert.ok(backup); sources = next; },
+    validateEnergyDashboard: async () => ({ energy_sources: [[{ type: "statistics_not_defined" }]] }),
+  };
+  await assert.rejects(ensureEnergyDashboardSource(client, statisticId, "PND", {
+    backupStore: { load: async () => ({}), save: async (value) => { backup = value; } },
+  }), /validation/);
+  assert.deepEqual(sources, original);
+  assert.deepEqual(backup.preferences.energy_sources, original);
+});
+
+test("rollback preserves later foreign additions and refuses edited own source", async () => {
+  const { rollbackEnergyDashboard } = await import("../src/energy-dashboard.js");
+  const own = addUnifiedGridSource([], statisticId, "PND")[0];
+  const pv = { type: "solar", stat_energy_from: "sensor.later_pv" };
+  let sources = [own, pv];
+  const client = {
+    getEnergyPreferences: async () => ({ energy_sources: sources }),
+    saveEnergySources: async (next) => { sources = next; },
+  };
+  const backup = { load: async () => ({ added: own }) };
+  assert.equal((await rollbackEnergyDashboard(client, backup)).changed, true);
+  assert.deepEqual(sources, [pv]);
+  sources = [{ ...own, name: "Changed by user" }, pv];
+  await assert.rejects(rollbackEnergyDashboard(client, backup), /modified after installation/);
+  assert.equal(sources.length, 2);
+});

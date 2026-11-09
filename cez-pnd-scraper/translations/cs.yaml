@@ -32,3 +32,12 @@ configuration:
   log_level:
     name: Úroveň logování
     description: Podrobnost logů aplikace.
+  correction_days:
+    name: Zpětná kontrola měření
+    description: Počet již importovaných dní, které se denně znovu načtou kvůli opravám PND (0–90).
+  writer_mode:
+    name: Zapisovač statistik
+    description: Legacy zachovává samostatný scraper. Native předá zápis Recorderu nativní integraci a vypne původní plánovač.
+  bridge_token:
+    name: Token nativního transportu
+    description: Soukromý token pro spojení s nativní integrací. Nevkládejte sem heslo k PND.

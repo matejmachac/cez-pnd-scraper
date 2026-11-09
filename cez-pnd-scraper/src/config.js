@@ -19,6 +19,9 @@ export async function loadConfig(optionsPath = process.env.OPTIONS_PATH ?? DEFAU
     importMinute: toInteger(process.env.IMPORT_MINUTE ?? options.import_minute, 30),
     retryMinutes: toInteger(process.env.RETRY_MINUTES ?? options.retry_minutes, 60),
     backfillFrom: String(process.env.BACKFILL_FROM ?? options.backfill_from ?? "").trim(),
+    correctionDays: toInteger(options.correction_days, 7),
+    writerMode: String(options.writer_mode ?? "legacy"),
+    bridgeToken: String(options.bridge_token ?? ""),
     addToEnergyDashboard: toBoolean(
       process.env.ADD_TO_ENERGY_DASHBOARD ?? options.add_to_energy_dashboard,
       true,
@@ -39,6 +42,9 @@ export async function loadConfig(optionsPath = process.env.OPTIONS_PATH ?? DEFAU
   if (!config.email) throw new Error("Missing required PND email");
   if (!config.password) throw new Error("Missing required PND password");
   if (config.backfillFrom) parseImportDate(config.backfillFrom, config.timezone);
+  if (config.correctionDays < 0 || config.correctionDays > 90) throw new Error("correction_days must be 0-90");
+  if (!["legacy", "native"].includes(config.writerMode)) throw new Error("writer_mode must be legacy or native");
+  if (config.writerMode === "native" && config.bridgeToken.length < 32) throw new Error("Native transport requires a bridge token of at least 32 characters");
   if (config.importHour < 0 || config.importHour > 23) throw new Error("import_hour must be 0-23");
   if (config.importMinute < 0 || config.importMinute > 59) throw new Error("import_minute must be 0-59");
   if (!config.supervisorToken) throw new Error("SUPERVISOR_TOKEN is missing");
