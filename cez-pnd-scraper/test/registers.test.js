@@ -37,3 +37,12 @@ test("day boundaries follow Prague DST and cannot bridge missing days", () => {
   assert.equal((Date.parse(result.end) - Date.parse(result.start)) / 3600000, 23);
   assert.throws(() => deriveDailyTariffs(a, current()), /one Prague calendar day/);
 });
+
+test("browser cs-CZ decimal commas below 1000 are never treated as US thousands", () => {
+  const before = parseRegisterCsv(`${header}\n${row("07.11.2026", "2\u00a0236,796", "1\u00a0870,517", "366,279")}`, { numericLocale: 'cs-CZ' });
+  const after = parseRegisterCsv(`${header}\n${row("08.11.2026", "2\u00a0288,142", "1\u00a0916,703", "371,439")}`, { numericLocale: 'cs-CZ' });
+  assert.equal(after.find(sample => sample.register === 'vt').kwh, 371.439);
+  assert.equal(deriveDailyTariffs(before, after, { profileKwh: 51.34575 }).quality, 'measured');
+  assert.equal(deriveDailyTariffs(before, after).vt, 5.16);
+  assert.equal(deriveDailyTariffs(before, after).nt, 46.186);
+});

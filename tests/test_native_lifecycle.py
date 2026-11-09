@@ -215,6 +215,16 @@ async def test_monthly_acquisition_reuses_one_export_and_keeps_daily_validation(
     assert calls == ["month"]
     assert entry.runtime_data.data["totals"]["import_total"] == 48
     assert entry.runtime_data.data["tariff_quality"] == "daily_measured"
+    # Repair a historical parser error from the fresh month's opening register,
+    # even if a later day is refreshed before its archived predecessor.
+    previous = await entry.runtime_data.archive.get("2026-11-07")
+    for row in previous["registers"]:
+        if row["register"] == "vt":
+            row["kwh"] *= 1000
+    await entry.runtime_data.archive.put("2026-11-07", previous)
+    await entry.runtime_data.synchronize("2026-11-08", "2026-11-08")
+    repaired = await entry.runtime_data.archive.get("2026-11-08")
+    assert repaired["tariffs"]["quality"] == "measured"
 
 
 async def simple_entry(hass, monkeypatch, point):
@@ -396,3 +406,71 @@ async def test_older_tariff_gap_cannot_leave_later_sums_below_the_new_baseline(
     assert [row["sum"] for row in result[coordinator.ids["import_vt"]]] == [4, 8]
     assert coordinator.archive.state["tariff_quality"] == "incomplete"
     assert coordinator.archive.state["cost_quality"] == "incomplete"
+
+
+@pytest.mark.asyncio
+async def test_config_entry_starts_and_finishes_real_background_job(hass, monkeypatch):
+    import asyncio
+
+    async def info(self):
+        return {
+            "protocol": 1,
+            "writerMode": "native",
+            "statisticId": "cez_pnd:background_total",
+        }
+
+    async def get(self, path, **params):
+        day = params["date"]
+        index = (date.fromisoformat(day) - date(2026, 11, 6)).days
+        reads = registers(day, 24 * index, 20 * index, 4 * index)
+        return reads if path == "registers" else {**profile(day), "registers": reads}
+
+    monkeypatch.setattr(PndTransport, "info", info)
+    monkeypatch.setattr(PndTransport, "get", get)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": "user"},
+        data={
+            "url": "http://synthetic:8099",
+            "token": "synthetic-token",
+            "supply_point": "background",
+            "history_start": "2026-11-07",
+            "statistic_id": "",
+        },
+    )
+    entry = result["result"]
+    await hass.async_block_till_done()
+    await asyncio.wait_for(entry.runtime_data.task, 15)
+    assert entry.runtime_data.data["status"] == "idle"
+    assert entry.runtime_data.data["last_success"]
+    assert entry.runtime_data.data["totals"]["import_total"] == 48
+
+
+@pytest.mark.asyncio
+async def test_no_source_month_is_cached_and_not_retried_as_missing(hass, monkeypatch):
+    from custom_components.cez_pnd.api import UnavailablePeriod
+
+    entry, _ = await simple_entry(hass, monkeypatch, "unavailable")
+    coordinator = entry.runtime_data
+    coordinator.monthly = True
+    calls = []
+
+    async def unavailable(self, path, **params):
+        calls.append((path, params))
+        raise UnavailablePeriod("No source")
+
+    monkeypatch.setattr(PndTransport, "get", unavailable)
+    await coordinator.synchronize("2026-06-01", "2026-06-30")
+    assert len(calls) == 1
+    assert len(coordinator.archive.state["unavailable_days"]) == 30
+    assert coordinator.archive.state["missing_days"] == []
+    assert coordinator.archive.state["status"] == "idle"
+    await coordinator.rollback()
+    await hass.services.async_call(
+        DOMAIN,
+        "backfill",
+        {"entry_id": entry.entry_id, "start": "2026-06-01", "end": "2026-06-02"},
+        blocking=True,
+    )
+    assert coordinator.archive.state["enabled"] is True
+    assert coordinator.closed is False

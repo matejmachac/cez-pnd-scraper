@@ -26,7 +26,8 @@ test('native monthly Chromium export includes opening registers, excludes today,
       for(let day=from;day<to;day=day.plus({days:1}),index++){
         if(registry){
           const stamp=day.toFormat('dd.MM.yyyy')+' 24:00:00';
-          rows.push(`"${stamp}";${index*24};"namerena data OK";"${stamp}";${index*20};"namerena data OK";"${stamp}";${index*4};"namerena data OK"`);
+          const number = value => new Intl.NumberFormat("cs-CZ", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(value);
+          rows.push(`"${stamp}";${number(index*24+0.142)};"namerena data OK";"${stamp}";${number(index*20+0.003)};"namerena data OK";"${stamp}";${number(index*4+0.139)};"namerena data OK"`);
         }else rows.push(...syntheticCsv(day.toISODate()).split('\n').slice(1));
       }
       response.writeHead(200,{'content-type':'text/plain'}).end(rows.join('\n'));
@@ -60,6 +61,37 @@ test('native monthly Chromium export includes opening registers, excludes today,
   assert.equal(Object.keys(result.profiles).length,9);
   assert.equal(result.profiles['2026-11-08'].intervals.length,96);
   assert.equal(result.registers.length,27);
+  assert.equal(result.registers.find(row=>row.register === "vt").kwh,4.139);
   assert.equal(result.incomplete.length,0);
   assert.deepEqual(requests.map(row=>row.report),['01','01','17','01']);
+});
+
+
+test('authoritative no-source result does not retry credentials or wait for CSV', {
+  skip: process.env.PND_BROWSER_TESTS !== '1',
+}, async(t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'pnd-no-source-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  let searches = 0;
+  const portal = createServer((request, response) => {
+    if (request.url === '/search') {
+      searches++;
+      response.end('ok');
+      return;
+    }
+    response.writeHead(200, {'content-type':'text/html;charset=utf-8'}).end(`
+      <div class="pnd-window"><span>Všechny EANy</span>
+      <input id="meter-intervalType"><div class="multiselect__option">Vlastní období</div>
+      <input id="meter-interval"><button>Vyhledat data</button><div id="result"></div></div>
+      <script>document.querySelector('button').onclick=async()=>{
+        await fetch('/search');
+        document.getElementById('result').textContent='Pro danou konfiguraci nejsou k dispozici žádné datové zdroje';
+      };</script>`);
+  });
+  await new Promise(resolve => portal.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => portal.close(resolve)));
+  const scraper = new PndScraper({dataDir, timezone:'Europe/Prague', writerMode:'native', elm:'',
+    dashboardUrl:`http://127.0.0.1:${portal.address().port}/cezpnd2/external/dashboard/view`}, {info(){},warn(){}});
+  await assert.rejects(scraper.scrapeMonth('2026-06', DateTime.fromISO('2026-11-09')), {name:'NoDataSourcesError'});
+  assert.equal(searches, 1);
 });

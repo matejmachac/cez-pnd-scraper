@@ -11,7 +11,13 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
-from .api import PndTransport, TransportError, TransportAuthError, IncompleteMeasurement
+from .api import (
+    PndTransport,
+    TransportError,
+    TransportAuthError,
+    IncompleteMeasurement,
+    UnavailablePeriod,
+)
 from .const import DOMAIN, DEFAULT_PRICES
 from .energy import EnergyConfiguration, EnergyConflictError
 from .model import (
@@ -174,7 +180,12 @@ class PndCoordinator(DataUpdateCoordinator):
         if month not in self.bundles:
             if len(self.bundles) >= 2:
                 self.bundles.pop(next(iter(self.bundles)))
-            self.bundles[month] = await self.api.get("month", month=month)
+            try:
+                self.bundles[month] = await self.api.get("month", month=month)
+            except UnavailablePeriod:
+                self.bundles[month] = None
+        if self.bundles[month] is None:
+            raise UnavailablePeriod("PND month has no measured source")
         bundle = self.bundles[month]
         if not bundle["from"] <= day <= bundle["through"]:
             raise MeasurementError("PND month returned a different requested period")
@@ -190,7 +201,7 @@ class PndCoordinator(DataUpdateCoordinator):
     async def _registers(self, day):
         if self.monthly:
             for bundle in self.bundles.values():
-                if bundle["from"] <= day <= bundle["through"]:
+                if bundle is not None and bundle["from"] <= day <= bundle["through"]:
                     end = boundary(parse_date(day) + timedelta(days=1))
                     return [
                         row
@@ -259,7 +270,13 @@ class PndCoordinator(DataUpdateCoordinator):
                     intervals = normalise_profile(profile, self.supply_point)
                     previous_day = (parse_date(day) - timedelta(days=1)).isoformat()
                     previous = await self.archive.get(previous_day)
-                    opening = previous.get("registers", []) if previous else []
+                    # A fresh month bundle is authoritative for both boundaries;
+                    # archived opening values may predate a source correction.
+                    opening = (
+                        previous.get("registers", [])
+                        if previous and not self.monthly
+                        else []
+                    )
                     if not opening:
                         try:
                             opening = await self._registers(previous_day)
@@ -304,10 +321,19 @@ class PndCoordinator(DataUpdateCoordinator):
                         pending["dirty_from"] = min(day, pending["dirty_from"] or day)
                     if day in state.get("missing_days", []):
                         state["missing_days"].remove(day)
+                    if day in state.get("unavailable_days", []):
+                        state["unavailable_days"].remove(day)
                     state["last_measurement"] = max(
                         intervals[-1]["end"],
                         state.get("last_measurement", intervals[-1]["end"]),
                     )
+                except UnavailablePeriod:
+                    unavailable = state.setdefault("unavailable_days", [])
+                    if day not in unavailable:
+                        unavailable.append(day)
+                        unavailable.sort()
+                    if day in state.get("missing_days", []):
+                        state["missing_days"].remove(day)
                 except IncompleteMeasurement:
                     missing = state.setdefault("missing_days", [])
                     if day not in missing:
@@ -464,10 +490,10 @@ class PndCoordinator(DataUpdateCoordinator):
         await self.energy.rollback()
         self._notify("disabled")
 
-    async def resume(self):
+    async def resume(self, start=None, end=None):
         await self.api.info()  # Never resume while the legacy writer is active.
         self.archive.state["enabled"] = True
         self.closed = False
         await self.archive.save()
         self._notify("idle")
-        self.start()
+        self.start(start, end)

@@ -109,7 +109,10 @@ def _register_services(hass):
     async def backfill(call):
         coordinator = coordinator_for(call)
         start, end = period(call, coordinator)
-        coordinator.start(start, end)
+        if coordinator.archive.state.get("enabled", True):
+            coordinator.start(start, end)
+        else:
+            await coordinator.resume(start, end)
 
     async def reprice(call):
         coordinator = coordinator_for(call)

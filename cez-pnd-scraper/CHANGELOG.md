@@ -1,3 +1,11 @@
+# 0.5.1
+
+- Parse registry decimals using the export browser locale, including Czech decimal commas below 1000 kWh.
+- Refresh both daily registry boundaries from the same new monthly export when repairing historical readings.
+- Recognize authoritative PND no-source periods without resetting credentials or retrying indefinitely; cache unavailable months separately from incomplete measured days.
+- Allow an explicit backfill to safely resume a rolled-back native importer after verifying writer ownership.
+- Add real Chromium locale/no-source and HA historical correction regressions.
+
 # 0.5.0
 
 - Add native HA Core 2026.11 integration, configuration/options/reauth flows and diagnostic entities.

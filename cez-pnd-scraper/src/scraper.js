@@ -77,7 +77,7 @@ export class PndScraper {
             try {
               await this.selectReport(page, intervalInputId, /^17\s+Registry za den/);
               const csv = await this.downloadCsv(page, intervalInputId);
-              const samples = parseRegisterCsv(csv, { elm: this.config.elm, timezone: this.config.timezone, allowMultiple: this.config.writerMode === "native" });
+              const samples = parseRegisterCsv(csv, { elm: this.config.elm, timezone: this.config.timezone, allowMultiple: this.config.writerMode === "native", numericLocale: contextOptions.locale });
               const boundary = date.startOf("day").plus({ days: 1 }).toMillis();
               if (samples.some((sample) => Date.parse(sample.timestamp) !== boundary)) throw new Error("PND registry export returned a different day than requested");
               await context.storageState({ path: this.storageStatePath });
@@ -109,7 +109,7 @@ export class PndScraper {
             try {
               await this.selectReport(page, intervalInputId, /^17\s+Registry za den/);
               result.registers = parseRegisterCsv(await this.downloadCsv(page, intervalInputId), {
-                elm: this.config.elm, timezone: this.config.timezone, allowMultiple: true,
+                elm: this.config.elm, timezone: this.config.timezone, allowMultiple: true, numericLocale: contextOptions.locale,
               });
               const fromMs = date.toMillis();
               if (result.registers.some((sample) => Date.parse(sample.timestamp) <= fromMs || Date.parse(sample.timestamp) > end.toMillis())) throw new Error("PND registry export returned a different range");
@@ -143,7 +143,7 @@ export class PndScraper {
             try {
               await this.selectReport(page, intervalInputId, /^17\s+Registry za den/);
               profile.registers = parseRegisterCsv(await this.downloadCsv(page, intervalInputId), {
-                elm: this.config.elm, timezone: this.config.timezone, allowMultiple: true,
+                elm: this.config.elm, timezone: this.config.timezone, allowMultiple: true, numericLocale: contextOptions.locale,
               });
               const boundary = date.startOf("day").plus({ days: 1 }).toMillis();
               if (profile.registers.some((sample) => Date.parse(sample.timestamp) !== boundary)) throw new Error("PND registry export returned a different day than requested");
@@ -156,7 +156,7 @@ export class PndScraper {
           await page.screenshot({ path: this.errorScreenshotPath, fullPage: true }).catch(() => {});
           // A stale session can still reach the dashboard URL but fail to load
           // its windows. Recover from that too, not just /login?error.
-          if (!(error instanceof IncompleteDayError) && attempt === 0) {
+          if (!(error instanceof IncompleteDayError) && !(error instanceof NoDataSourcesError) && attempt === 0) {
             await rm(this.storageStatePath, { force: true });
             this.logger.warn("PND portal attempt failed; cleared saved session and retrying once", {
               error: error.message,
@@ -357,9 +357,11 @@ export class PndScraper {
 
     const exportReady = await pollForValue(page, async () => page.evaluate(({ id }) => {
       const scope = document.getElementById(id)?.closest(".pnd-window");
+      if (/Pro danou konfiguraci nejsou k dispozici žádné datové zdroje/i.test(scope?.textContent ?? "")) return "no_sources";
       return [...(scope?.querySelectorAll("a") ?? [])]
         .some((link) => link.textContent?.trim() === "CSV") || null;
     }, { id: intervalInputId }), 30_000);
+    if (exportReady === "no_sources") throw new NoDataSourcesError();
     if (!exportReady) throw new Error("PND search completed without a CSV export option");
   }
 
@@ -460,4 +462,8 @@ async function fileExists(filePath) {
   } catch {
     return false;
   }
+}
+
+export class NoDataSourcesError extends Error {
+  constructor() { super("PND reports no data sources for the requested period"); this.name = "NoDataSourcesError"; }
 }

@@ -19,6 +19,10 @@ class IncompleteMeasurement(TransportError):
     """A source day is not fully measured."""
 
 
+class UnavailablePeriod(IncompleteMeasurement):
+    """PND explicitly has no data sources in this period."""
+
+
 class PndTransport:
     def __init__(self, session, url, token):
         self.session = session
@@ -64,6 +68,11 @@ class PndTransport:
                         "PND transport authentication requires attention"
                     )
                 if response.status == 422:
+                    detail = await response.json()
+                    if detail.get("error") == "no_data_sources":
+                        raise UnavailablePeriod(
+                            "PND has no data sources in this period"
+                        )
                     raise IncompleteMeasurement("PND day is incomplete or unavailable")
                 if response.status != 200:
                     raise TransportError(

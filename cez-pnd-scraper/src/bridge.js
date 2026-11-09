@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { DateTime } from "luxon";
+import { NoDataSourcesError } from "./scraper.js";
 import { IncompleteDayError } from "./importer.js";
 
 // The transport never writes Recorder in native mode. The token authorizes only
@@ -47,6 +48,9 @@ export function createBridge({ config, stateStore, scraper, status }) {
       if (error.name === "PndLoginRejectedError" || error.cause?.name === "PndLoginRejectedError") {
         status.lastError = "authentication_required";
         send(403, { error: "pnd_auth_required" });
+      } else if (error instanceof NoDataSourcesError) {
+        status.lastError = "no_data_sources";
+        send(422, { error: "no_data_sources" });
       } else if (error instanceof IncompleteDayError) {
         status.lastError = "incomplete_measurement";
         send(422, { error: "incomplete_measurement" });

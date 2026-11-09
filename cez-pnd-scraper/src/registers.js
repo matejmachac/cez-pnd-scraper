@@ -1,14 +1,18 @@
 import { DateTime } from "luxon";
 import { parseCsv, parseCzechNumber, parsePndTimestamp } from "./parser.js";
 
-function exportNumber(raw) {
+function exportNumber(raw, numericLocale) {
   const value = String(raw ?? "").trim();
+  // PND formats CSV through the browser locale. In cs-CZ, "371,439"
+  // is a decimal register, not a US thousands-grouped integer.
+  if (numericLocale === "cs-CZ") return parseCzechNumber(value);
   // Actual PND registry CSV uses US thousands grouping despite Czech DOM text.
   if (/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(value)) return Number(value.replaceAll(",", ""));
   return parseCzechNumber(value);
 }
 
-export function parseRegisterCsv(csv, { elm = "", timezone = "Europe/Prague", allowMultiple = false } = {}) {
+export function parseRegisterCsv(csv, { elm = "", timezone = "Europe/Prague", allowMultiple = false, numericLocale = "en-US" } = {}) {
+  if (!["cs-CZ", "en-US"].includes(numericLocale)) throw new Error("Unsupported PND numeric locale");
   const [headers = [], ...rows] = parseCsv(csv);
   const columns = headers.map((header, index) => ({ index, match: header.match(/^\+E(_NT|_VT)?\/([^\s]+)\s+\[kWh\]$/i) }))
     .filter(({ match }) => match && (!elm || match[2] === elm));
@@ -24,7 +28,7 @@ export function parseRegisterCsv(csv, { elm = "", timezone = "Europe/Prague", al
       const status = String(cells[index + 1] ?? "").normalize("NFD").replace(/\p{Mark}/gu, "").toLowerCase();
       if (status.trim() !== "namerena data ok") continue;
       const timestamp = parsePndTimestamp(cells[index - 1], timezone);
-      const kwh = exportNumber(cells[index]);
+      const kwh = exportNumber(cells[index], numericLocale);
       if (!timestamp || timestamp.toMillis() !== timestamp.startOf("day").toMillis() || kwh === null || kwh < 0) throw new Error("Invalid daily register reading");
       const register = match[1]?.toLowerCase().replace("_", "") ?? "total";
       const key = `${match[2]}/${timestamp.toMillis()}/${register}`;
