@@ -76,11 +76,14 @@ class PndCoordinator(DataUpdateCoordinator):
         return validate_prices(self.entry.options.get("prices", DEFAULT_PRICES))
 
     async def async_initialize(self):
+        await self.archive.load()
+        if not self.archive.state.get("enabled", True):
+            self._notify("disabled")
+            return
         info = (
             await self.api.info()
         )  # Reject a still-running legacy writer before publication.
         self.monthly = "month" in info.get("capabilities", [])
-        await self.archive.load()
         self._notify("idle")
 
     def _issue(self, key, active, message=None):

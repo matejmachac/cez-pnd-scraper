@@ -330,3 +330,21 @@ async def test_source_auth_failure_creates_native_reauth_flow(hass, monkeypatch)
     await hass.async_block_till_done()
     flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert any(flow["context"].get("source") == "reauth" for flow in flows)
+
+
+@pytest.mark.asyncio
+async def test_rollback_stays_disabled_when_legacy_transport_resumes(hass, monkeypatch):
+    from custom_components.cez_pnd.api import TransportError
+
+    entry, _ = await simple_entry(hass, monkeypatch, "rollback")
+    await entry.runtime_data.synchronize("2026-11-07", "2026-11-08")
+    await entry.runtime_data.rollback()
+
+    async def legacy(*args, **kwargs):
+        raise TransportError("Legacy writer is active; native endpoint is unavailable")
+
+    monkeypatch.setattr(PndTransport, "info", legacy)
+    await hass.config_entries.async_reload(entry.entry_id)
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.data["status"] == "disabled"
+    assert entry.runtime_data.archive.state["enabled"] is False
