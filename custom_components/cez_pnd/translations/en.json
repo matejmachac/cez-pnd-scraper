@@ -73,7 +73,7 @@
     },
     "price_data": {
       "title": "ČEZ PND – Historical prices are missing",
-      "description": "Part of the history has no confirmed price period. Add the applicable prices in the integration settings and recalculate historical costs. Days: {detail}.",
+      "description": "Part of the history has no confirmed price period. Add the applicable prices in the integration settings and recalculate historical costs. Days: {detail}. Native Energy may show zero for periods without cost data. This does not mean electricity was free.",
       "fix_flow": {
         "step": {
           "init": {

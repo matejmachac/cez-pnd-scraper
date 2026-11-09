@@ -500,3 +500,26 @@ async def test_recent_measurement_gap_is_not_starved_by_empty_early_history(
     assert "2026-08-20" in requested
     assert "2026-07-30" in requested
     assert "2026-07-01" not in requested
+
+
+@pytest.mark.asyncio
+async def test_recent_priced_correction_keeps_older_unknown_price_warning(
+    hass, monkeypatch
+):
+    from homeassistant.helpers import issue_registry as ir
+    from custom_components.cez_pnd.const import DEFAULT_PRICES
+
+    entry, _ = await simple_entry(hass, monkeypatch, "unknown_price")
+    prices = [{**DEFAULT_PRICES[0], "from": "2026-11-08"}]
+    monkeypatch.setattr(PndCoordinator, "prices", property(lambda self: prices))
+    coordinator = entry.runtime_data
+    await coordinator.synchronize("2026-11-07", "2026-11-08")
+    await coordinator.synchronize("2026-11-08", "2026-11-08")
+    assert coordinator.archive.state["unpriced_days"] == ["2026-11-07"]
+    assert (
+        ir.async_get(hass).async_get_issue(DOMAIN, f"{entry.entry_id}_price_data")
+        is not None
+    )
+    state = hass.states.get("sensor.cez_pnd_unknown_price_naklady_na_elektrinu")
+    assert state.attributes["unpriced_measured_days"] == 1
+    assert state.attributes["price_periods"][0]["from"] == "2026-11-08"

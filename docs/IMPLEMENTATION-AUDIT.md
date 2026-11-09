@@ -106,7 +106,7 @@ změní vlastněný Energy zdroj, rollback jej automaticky nepřepisuje.
 
 ## Ověření
 
-- Python: **26 testů prošlo** na skutečném HA Core 2026.11.0/Recorder/Energy.
+- Python: **27 testů prošlo** na skutečném HA Core 2026.11.0/Recorder/Energy.
 - Node: **73 testů prošlo**, 8 Chromium scénářů se spouští samostatně.
 - Chromium: **8 scénářů prošlo**, včetně českých registrů a období bez zdrojů.
 - JS syntaxe, Ruff a whitespace kontrola prošly.
@@ -152,6 +152,17 @@ Recorder API; měsíční ceny byly navíc nezávisle přepočteny kontrolním s
 
 Kontrolní screenshoty jsou lokální soukromé artefakty mimo git v adresáři
 `~/.codex/visualizations/2026/11/09/01a1c02c-47af-7e02-be46-1ff1644098cc/`.
+Po řízeném restartu se integrace automaticky obnovila a zopakovala inkrementální
+synchronizaci. Součty zůstaly stejné: 1370,54325 kWh a 3329,269514553 Kč, bez
+duplicit. Nativní nastavení obsahuje upravitelné ceníky a české/anglické popisky.
+
+**Omezení zobrazení HA:** pro období bez nákladových statistik nativní Energy
+zobrazuje 0 Kč. Před 1. 10. to zde znamená neznámou cenu, nikoli elektřinu zdarma.
+Integrace pro tato období žádné nulové náklady neimportuje. Trvalé Repairs
+upozornění eviduje 58 naměřených dnů bez ceníku i po synchronizaci novějšího
+oceněného dne; senzor nákladů uvádí počet neoceněných dnů a platné cenové
+intervaly. U tarifních součtů je obdobně uveden jeden den bez páru registrů.
+
 Běžná synchronizace běží po 12 hodinách a kontroluje posledních 7 dní a
 nejnovější chybějící dny. Přesná publikační doba PND nebyla z jednoho dne
 nezávisle změřena; řešení neposkytuje realtime monitoring.

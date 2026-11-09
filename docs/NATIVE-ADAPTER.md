@@ -135,3 +135,11 @@ vlastníka zápisu a vyjedná dostupné možnosti transportu.
 Pro kontrolu archivu lze v HA terminálu použít `deploy/audit_history.py`.
 Nástroj pouze čte vlastní archiv a vypisuje měsíční součty a kvalitu; nečte ani
 nevypisuje PND přihlašovací údaje, tokeny, URL nebo fyzická ID měřičů.
+
+
+Nativní Energy pro období bez peněžních statistik může zobrazit 0 Kč. Tato
+hodnota není potvrzená nulová cena. Integrace udržuje Repairs upozornění pro
+všechny uložené dny bez ceníku, i když poslední opravený den již ceník má.
+Atributy senzoru nákladů obsahují `unpriced_measured_days` a `price_periods`;
+tarifní součty obsahují `unpaired_measured_days`. Tím lze rozlišit úplné oceněné
+období od neoceněné či nespárované starší historie.

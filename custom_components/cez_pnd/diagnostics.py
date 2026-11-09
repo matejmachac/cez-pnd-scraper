@@ -10,6 +10,8 @@ async def async_get_config_entry_diagnostics(hass, entry):
         "writer": "native",
         "status": state.get("status"),
         "enabled": state.get("enabled", True),
+        "unpriced_measured_days": len(state.get("unpriced_days", [])),
+        "unpaired_measured_days": len(state.get("unpaired_tariff_days", [])),
         "archived_days": len(state.get("days", [])),
         "unavailable_days": len(state.get("unavailable_days", [])),
         "missing_days": len(state.get("missing_days", [])),

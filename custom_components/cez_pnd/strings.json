@@ -73,7 +73,7 @@
     },
     "price_data": {
       "title": "ČEZ PND – Chybějící historický ceník",
-      "description": "Pro část historie není potvrzený ceník. Zadejte jej v nastavení integrace a spusťte přepočet nákladů. Počet: {detail}.",
+      "description": "Pro část historie není potvrzený ceník. Zadejte jej v nastavení integrace a spusťte přepočet nákladů. Počet: {detail}. Nativní Energy může pro období bez nákladových dat zobrazit nulu. Neznamená to nulovou cenu elektřiny.",
       "fix_flow": {
         "step": {
           "init": {

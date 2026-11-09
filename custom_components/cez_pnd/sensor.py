@@ -161,12 +161,25 @@ class PndSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         key = self.entity_description.key
         if key in self.coordinator.ids:
-            return {
+            attributes = {
                 "statistic_id": self.coordinator.ids[key],
                 "resolution": "hour" if key == "import_total" else "day",
                 "source": "ČEZ PND",
                 "delayed_measurements": True,
             }
+            if key in ("import_vt", "import_nt"):
+                attributes["unpaired_measured_days"] = len(
+                    (self.coordinator.data or {}).get("unpaired_tariff_days", [])
+                )
+            if key == "cost_total":
+                attributes["unpriced_measured_days"] = len(
+                    (self.coordinator.data or {}).get("unpriced_days", [])
+                )
+                attributes["price_periods"] = [
+                    {"from": price["from"], "until": price["until"]}
+                    for price in self.coordinator.prices
+                ]
+            return attributes
         if key == "fixed":
             return {"billing_period": "calendar_month", "vat_included": True}
         return None

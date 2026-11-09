@@ -454,9 +454,26 @@ class PndCoordinator(DataUpdateCoordinator):
             and price_for_day(last_profile, self.prices)
             else "incomplete"
         )
+        # Repairs describe the entire retained history, not only the latest
+        # correction batch. A recent priced day must not hide older unknown costs.
+        state["unpriced_days"] = [
+            day for day in state.get("days", []) if not price_for_day(day, self.prices)
+        ]
+        state["unpaired_tariff_days"] = [
+            day
+            for day in state.get("days", [])
+            if (item := await self.archive.get(day))
+            and item["tariffs"]["quality"] != "measured"
+        ]
         await self.archive.save()  # All expected hours were read back from Recorder.
-        self._issue("tariff_data", bool(unknown_tariffs), str(len(unknown_tariffs)))
-        self._issue("price_data", bool(unpriced), str(len(unpriced)))
+        self._issue(
+            "tariff_data",
+            bool(state["unpaired_tariff_days"]),
+            str(len(state["unpaired_tariff_days"])),
+        )
+        self._issue(
+            "price_data", bool(state["unpriced_days"]), str(len(state["unpriced_days"]))
+        )
         try:
             if state.get("last_published"):
                 await self.energy.configure(

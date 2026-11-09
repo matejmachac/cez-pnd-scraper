@@ -5,6 +5,7 @@
 - Recognize authoritative PND no-source periods without resetting credentials or retrying indefinitely; cache unavailable months separately from incomplete measured days.
 - Allow an explicit backfill to safely resume a rolled-back native importer after verifying writer ownership.
 - Add real Chromium locale/no-source and HA historical correction regressions.
+- Keep historical unknown-price warnings after recent corrections, expose cost coverage, and add English native settings labels.
 
 # 0.5.0
 
